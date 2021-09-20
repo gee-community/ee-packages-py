@@ -40,7 +40,7 @@ cloudMaskAlgorithms = {
   'L4': cloudMaskAlgorithms_Dummy
 }
 
-def assets_getImages(g, options):
+def getImages(g, options):
   g = ee.Geometry(g)
   
   resample = False
@@ -332,7 +332,7 @@ def mosaicByTime(images):
   
   return ee.ImageCollection(results)
 
-def assets_addQualityScore(images, g, options):
+def addQualityScore(images, g, options):
   scorePercentile = 75
   scale = 500
   mask = None
@@ -367,7 +367,7 @@ def assets_addQualityScore(images, g, options):
 
   return images.map(add_quality_score)
 
-def assets_getMostlyCleanImages(images, g, options):
+def getMostlyCleanImages(images, g, options):
   g = ee.Geometry(g)
   
   scale = 500
@@ -400,7 +400,7 @@ def assets_getMostlyCleanImages(images, g, options):
 
   size = images.size()
   
-  images = (assets_addQualityScore(images, g, options)
+  images = (addQualityScore(images, g, options)
     .filter(ee.Filter.gt('quality_score', 0))) # sometimes null?!
 
   # clip collection
@@ -415,16 +415,4 @@ def assets_getMostlyCleanImages(images, g, options):
 
   return images
     # .set({scoreMax: scoreMax})
-
-class Assets:
-    def getImages(self, g, options):
-        return assets_getImages(g, options)
-
-    def getMostlyCleanImages(self, images, g, options):
-        return assets_getMostlyCleanImages(images, g, options)
-
-    def addQualityScore(self, images, g, options):
-        return assets_addQualityScore(images, g, options)
-
-assets = Assets()        
 
