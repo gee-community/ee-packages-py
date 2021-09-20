@@ -23,7 +23,7 @@ setup(
     author_email="gennadiy.donchyts@gmail.com",
 
     description="A set of utilities built on top of Google Earth Engine (migrated from JavaScript)",
-    long_description=read("README.md"),
+    long_description=read("README.rst"),
 
     packages=find_packages(exclude=('tests',)),
 
