@@ -23,11 +23,13 @@ setup(
     author_email="gennadiy.donchyts@gmail.com",
 
     description="A set of utilities built on top of Google Earth Engine (migrated from JavaScript)",
-    long_description=read("README.rst"),
+    long_description=read("README.md"),
 
     packages=find_packages(exclude=('tests',)),
 
-    install_requires=[],
+    install_requires=[
+        "earthengine-api>=0.1.284"
+    ],
 
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',

@@ -1,0 +1,5 @@
+ipykernel==6.4.1
+dacite==1.6.0
+earthengine-api==0.1.282
+geemap==0.9.0
+geetools==0.6.14
