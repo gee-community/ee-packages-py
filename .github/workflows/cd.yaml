@@ -42,8 +42,8 @@ jobs:
         bump2version \
           --commit \
           --tag \
-          ${{ env.part }} setup.py
-        git push --tags
+          ${{ env.part }}
+        git push --atomic origin main v$(cat .bumpversion.cfg | grep -Po "current_version = \K\d+\.\d+\.\d+") 
 
     - name: Build package
       run: python -m build
