@@ -17,3 +17,8 @@ A set of utilities built on top of Google Earth Engine (migrated from JavaScript
 ## Authors
 
 `eepackages` was written by `Gennadii Donchyts <gennadiy.donchyts@gmail.com>`_.
+
+## TODO
+
+- unit testing
+- coverage
