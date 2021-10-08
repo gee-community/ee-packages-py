@@ -1,6 +1,6 @@
 import ee
-import os
-import time
+
+from eepackages import utils
 
 # migrated from JavaScript users/gena/packages/assets.js
 

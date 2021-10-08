@@ -37,3 +37,6 @@ nosetests.xml
 
 # pyenv virtualenv
 .python-version
+
+# act
+.secrets
