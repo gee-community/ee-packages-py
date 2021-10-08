@@ -5,6 +5,7 @@ import re
 from setuptools import find_packages
 from setuptools import setup
 
+__version__ = '0.1.0'
 
 def read(filename):
     filename = os.path.join(os.path.dirname(__file__), filename)
@@ -12,10 +13,9 @@ def read(filename):
     with io.open(filename, mode="r", encoding='utf-8') as fd:
         return re.sub(text_type(r':[a-z]+:`~?(.*?)`'), text_type(r'``\1``'), fd.read())
 
-
 setup(
     name="eepackages",
-    version="0.1.0",
+    version=__version__,
     url="https://github.com/gee-community/ee-packages-py",
     license='MIT',
 
