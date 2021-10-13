@@ -58,14 +58,13 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
     edge = edge.multiply(mask)
     
     if minEdgeLength:
-        connected = edge.mask(edge).lt(cannyThreshold).connectedPixelCount(200, true)
+        connected = edge.mask(edge).lt(cannyThreshold).connectedPixelCount(200, True)
 
         edgeLong = connected.gte(minEdgeLength)
 
-        if debug:
-          print('Edge length: ', ui.Chart.image.histogram(connected, bounds, scale, buckets))
-          
-          # Map.addLayer(edge.mask(edge), {palette:['ff0000']}, 'edges (short)', false);
+        # if debug:
+        #  print('Edge length: ', ui.Chart.image.histogram(connected, bounds, scale, buckets))
+        #  Map.addLayer(edge.mask(edge), {palette:['ff0000']}, 'edges (short)', false);
 
         edge = edgeLong;
     
@@ -85,12 +84,12 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
 
       edgeGradientTh = ee.Number(edgeGradient.reduceRegion(ee.Reducer.percentile([minEdgeGradient]), bounds, scale).values().get(0))
 
-      if debug:
-        print('Edge gradient threshold: ', edgeGradientTh)
+      # if debug:
+      #  print('Edge gradient threshold: ', edgeGradientTh)
         
-        # Map.addLayer(edgeGradient.mask(edgeGradient), {palette:['ff0000']}, 'edge gradient', false);
+      #  Map.addLayer(edgeGradient.mask(edgeGradient), {palette:['ff0000']}, 'edge gradient', false);
 
-        print('Edge gradient: ', ui.Chart.image.histogram(edgeGradient, bounds, scale, buckets))
+      #  print('Edge gradient: ', ui.Chart.image.histogram(edgeGradient, bounds, scale, buckets))
       
       edgeBuffer = edgeBuffer.updateMask(edgeGradient.gt(edgeGradientTh))
 
@@ -120,8 +119,8 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
 
         print('Threshold: ', threshold);
 
-        print('Image values:', ui.Chart.image.histogram(image, bounds, scale, buckets));
-        print('Image values (edge): ', ui.Chart.image.histogram(imageEdge, bounds, scale, buckets));
+        # print('Image values:', ui.Chart.image.histogram(image, bounds, scale, buckets));
+        # print('Image values (edge): ', ui.Chart.image.histogram(imageEdge, bounds, scale, buckets));
         # Map.addLayer(mask.mask(mask), {palette:['000000']}, 'image mask', false);
 
     if minValue is not None:
