@@ -65,7 +65,7 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
         if debug:
           print('Edge length: ', ui.Chart.image.histogram(connected, bounds, scale, buckets))
           
-          Map.addLayer(edge.mask(edge), {palette:['ff0000']}, 'edges (short)', false);
+          # Map.addLayer(edge.mask(edge), {palette:['ff0000']}, 'edges (short)', false);
 
         edge = edgeLong;
     
@@ -77,8 +77,8 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
 
       edgeBuffer = edgeBuffer.updateMask(edgeMin.gt(minEdgeValue))
 
-      if debug:
-        Map.addLayer(edge.updateMask(edgeBuffer), {palette:['ff0000']}, 'edge min', false);
+      # if debug:
+      #  Map.addLayer(edge.updateMask(edgeBuffer), {palette:['ff0000']}, 'edge min', false);
 
     if minEdgeGradient:
       edgeGradient = image.gradient().abs().reduce(ee.Reducer.max()).updateMask(edgeBuffer.mask())
@@ -88,7 +88,7 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
       if debug:
         print('Edge gradient threshold: ', edgeGradientTh)
         
-        Map.addLayer(edgeGradient.mask(edgeGradient), {palette:['ff0000']}, 'edge gradient', false);
+        # Map.addLayer(edgeGradient.mask(edgeGradient), {palette:['ff0000']}, 'edge gradient', false);
 
         print('Edge gradient: ', ui.Chart.image.histogram(edgeGradient, bounds, scale, buckets))
       
@@ -98,8 +98,8 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
     edgeBuffer = edge.focal_max(ee.Number(scale).multiply(1), 'square', 'meters');
     imageEdge = image.mask(edgeBuffer);
     
-    if debug:
-      Map.addLayer(imageEdge, {palette:['222200', 'ffff00']}, 'image edge buffer', false)
+    # if debug:
+    #  Map.addLayer(imageEdge, {palette:['222200', 'ffff00']}, 'image edge buffer', false)
     
     #  compute threshold using Otsu thresholding
     buckets = 100;
@@ -116,13 +116,13 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
         # // Map.addLayer(jrc, {palette: ['000000', 'ffff00']}, 'JRC')
         # // print('JRC occurrence (edge)', ui.Chart.image.histogram(jrc.updateMask(edge), bounds, scale, buckets))
 
-        Map.addLayer(edge.mask(edge), {palette:['ff0000']}, 'edges', true);
+        # Map.addLayer(edge.mask(edge), {palette:['ff0000']}, 'edges', true);
 
         print('Threshold: ', threshold);
 
         print('Image values:', ui.Chart.image.histogram(image, bounds, scale, buckets));
         print('Image values (edge): ', ui.Chart.image.histogram(imageEdge, bounds, scale, buckets));
-        Map.addLayer(mask.mask(mask), {palette:['000000']}, 'image mask', false);
+        # Map.addLayer(mask.mask(mask), {palette:['000000']}, 'image mask', false);
 
     if minValue is not None:
       return threshold.max(minValue)
