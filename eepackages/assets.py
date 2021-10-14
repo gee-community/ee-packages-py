@@ -403,7 +403,7 @@ def getMostlyCleanImages(images, g, options):
         
     images = images.filterBounds(g)
 
-    size = images.size()
+    size = images.size()  # not being used?
     
     images = (addQualityScore(images, g, options)
         .filter(ee.Filter.gt('quality_score', 0))) # sometimes null?!
