@@ -7,7 +7,6 @@ from eepackages import assets
 from eepackages import gl
 from eepackages import utils
 
-import os
 
 class Bathymetry(object):
     def __init__(self, waterIndexMin: float = -0.15, waterIndexMax: float = 0.35):
@@ -42,7 +41,7 @@ class Bathymetry(object):
             cloud_frequency_threshold_delta=cloud_frequency_threshold_data
         )
         # save loaded images in class as raw_images
-        self.raw_images = images
+        self._raw_images = images
         images = images.map(self._remove_all_zero_images)
 
         bounds = bounds.buffer(bounds_buffer, ee.Number(bounds_buffer).divide(10))
@@ -105,7 +104,7 @@ class Bathymetry(object):
             return image
 
         images: ee.ImageCollection = images.map(_set_image_area_properties)
-        self.images_step_1 = images
+        self._images_area_properties = images
 
         # Filter images with negative RGB values
         images = images.filter(ee.Filter.And(
@@ -240,7 +239,7 @@ class Bathymetry(object):
 
         images = images.map(image_map_func)
 
-        self.images_step_2 = images
+        self._images_with_statistics = images
 
         # mean = sum(w * x) / sum(w)
         image: ee.Image = images.map(lambda i: i.select(bands + ["water"]).multiply(i.select("weight"))) \
@@ -255,7 +254,6 @@ class Bathymetry(object):
         stop: datetime,
         scale: float,
         filter_masked: bool,
-        dl_dimensions: str,
         filter_masked_fraction: Optional[float] = None,
         filter: Optional[ee.Filter] = None,
         bounds_buffer: Optional[float] = None,
@@ -268,7 +266,7 @@ class Bathymetry(object):
         lower_cdf_boundary: float = 70,
         upper_cdf_boundary: float = 80,
         cloud_frequency_threshold_data: float = 0.15,
-        clip: bool = False,
+        clip: bool = False
     ) -> ee.Image:
         if water_index_min:
             self.waterIndexMin = water_index_min
@@ -291,7 +289,7 @@ class Bathymetry(object):
             filter=filter
         )
 
-        self.images = images
+        self._raw_images = images
 
         bands: List[str] = ["blue", "green", "red", "nir", "swir"]
 
@@ -302,33 +300,8 @@ class Bathymetry(object):
 
         images = images.map(mask_zero_images)
 
-        def download_images(img):
-            '''
-            download images in image collection. Only works for small datasets!
-            '''
-
-            url = img.getThumbURL({
-                'region': ee.Geometry(bounds),
-                'dimensions': dl_dimensions,
-                'format': 'png'
-            })
-
-            r = requests.get(url, stream = True)
-            image_id = img.get('DATASTRIP_ID')
-            if not os.path.exists('./thumburl'):
-                os.mkdir('./thumburl')
-            filename = os.path.join('.', 'thumburl', f'{image_id}.png')
-
-            with open(filename, 'wb') as outfile:
-                shutil.copyfileobj(r.raw, outfile)
-            ee.Initialize() # to hop back into default API
-            return
-
-        # Downloads and clips images into png
-        dl = images.map(lambda x: x.clip(bounds)).map(download_images)
-
         if not bounds_buffer:
-            bounds_buffer = 10000
+            bounds_buffer = 10000  # Not being used.
 
         if skip_neighborhood_search:
             images = assets.addCdfQualityScore(images, 70, 80, False)
@@ -359,7 +332,7 @@ class Bathymetry(object):
 
             images = images.map(fix_scene_boundaries)
 
-        self.images2 = images
+        self._refined_images = images
 
         # mean = sum(w * x) / sum (w)
         self.composite = images.map(lambda i: i.select(bands).multiply(i.select("weight"))) \
@@ -368,7 +341,7 @@ class Bathymetry(object):
         bands = ["ndwi", "indvi", "mndwi"]
 
         def calculate_water_statistics(i: ee.Image) -> ee.Image:
-            t = i.get("system:time_start")
+            t = i.get("system:time_start")  # Not used
             weight: ee.Image = i.select("weight")
 
             ndwi: ee.Image = i.normalizedDifference(["green", "nir"]).rename("ndwi")
@@ -383,11 +356,13 @@ class Bathymetry(object):
 
         images = images.map(calculate_water_statistics)
 
+        self._images_with_statistics = images
+
         image = images.map(lambda i: i.select(bands).multiply(i.select("weight"))) \
             .sum().divide(images.select("weight").sum())
 
         if clip == True:
-            return clip_images(image)
+            return image.clip(bounds)
         else:
             return image
 
