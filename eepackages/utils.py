@@ -1,7 +1,8 @@
+from ctypes import ArgumentError
 from itertools import repeat
 import multiprocessing
 import os
-from typing import Optional
+from typing import Any, Callable, Dict, Optional
 import requests
 import shutil
 from pathlib import Path
@@ -126,7 +127,7 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
 
         # Map.addLayer(edge.mask(edge), {palette:['ff0000']}, 'edges', true);
 
-        print('Threshold: ', threshold);
+        print('Threshold: ', threshold)
 
         # print('Image values:', ui.Chart.image.histogram(image, bounds, scale, buckets));
         # print('Image values (edge): ', ui.Chart.image.histogram(imageEdge, bounds, scale, buckets));
@@ -154,55 +155,139 @@ def focalMaxWeight(image: ee.Image, radius: float):
 @retry(tries=10, delay=5, backoff=10)
 def _download_image(
     index: int,
+    image_download_method: Callable,
     image_list: ee.List,
-    name_prefix: str = "ic_download",
-    out_dir: Optional[Path] = None
+    name_prefix: str,
+    out_dir: Optional[Path],
+    download_kwargs: Optional[Dict[str, Any]]
 ) -> None:
     """
     Hidden function to be used with download_image_collection. For the multiprocessing module, this
     function must be on the main level in the file (not within function).
     """
     if not out_dir:
-        out_dir = Path.cwd() / "output"
+        out_dir: Path = Path.cwd() / "output"
+    if not download_kwargs:
+        download_kwargs: Dict[str, str] = {}
     img: ee.Image = ee.Image(image_list.get(index))
-    url: str = img.getDownloadUrl({"name": f"{name_prefix}_{index}"})
+    url: str = image_download_method(img, download_kwargs)
     r: requests.Response = requests.get(url, stream=True)
-    filename = out_dir / f"{name_prefix}_{index}.tiff.zip"
-    if not out_dir.exists():
-        os.mkdir(out_dir)
+
+    # File format chain
+    format: Optional[str] = download_kwargs.get("format")
+    if format:
+        if format == "GEO_TIFF":
+            extention: str = ".tif"
+        elif format == "NPY":
+            extention: str = ".npy"
+        elif format == "PNG":
+            extention: str = ".png"
+        elif format == "JPG":
+            extention: str = ".jpg"
+        else:
+            extention: str = ".tif.zip"
+    elif image_download_method == ee.Image.getDownloadURL:
+        extention: str = ".tif.zip"
+    elif image_download_method == ee.Image.getThumbURL:
+        extention: str = ".png"
+    else:
+        raise RuntimeError(f"image download method {image_download_method} unknown.")
+    
+    # Image naming chain
+    img_props: Dict[str, Any] = img.getInfo()['properties']
+    t0: Optional[int] = img_props.get("system:time_start")
+    img_index: Optional[int] = img_props.get("system:index")
+    if t0:
+        file_id: str = t0
+    elif img_index:
+        file_id: str = img_index
+    else:
+        file_id: str = index
+    
+    # File name
+    filename: Path = out_dir / f"{name_prefix}{file_id}{extention}"
 
     with open(filename, 'wb') as out_file:
         shutil.copyfileobj(r.raw, out_file)
     print("Done: ", index)
 
 
+def _batch_download_ic(
+    ic: ee.ImageCollection,
+    img_download_method: Callable,
+    name_prefix: str,
+    out_dir: Optional[Path], 
+    pool_size: int,
+    download_kwargs: Optional[Dict[str, Any]]
+):
+    """
+    does the actual work batch downloading images in an ee.ImageCollection using the python
+    multiprocessing module. Takes the img download method as a callable to implement different
+    ee.Image methods.
+    """
+
+    if not out_dir.exists():
+        os.mkdir(out_dir)
+    
+    ee.Initialize(opt_url='https://earthengine-highvolume.googleapis.com')
+
+    num_images: int = ic.size().getInfo()
+    image_list: ee.List = ic.toList(num_images)
+    
+    with multiprocessing.Pool(pool_size) as pool:
+        pool.starmap(_download_image, zip(
+            range(num_images),
+            repeat(img_download_method),
+            repeat(image_list),
+            repeat(name_prefix),
+            repeat(out_dir),
+            repeat(download_kwargs)
+        ))
+    
+    # Reset to default API url
+    ee.Initialize()
+
+
 def download_image_collection(
     ic: ee.ImageCollection,
-    name_prefix: str = "ic_download",
+    name_prefix: str = "ic_",
     out_dir: Optional[Path] = None, 
-    pool_size: int = 25
-  ) -> None:
+    pool_size: int = 25,
+    download_kwargs: Optional[Dict[str, Any]] = None
+) -> None:
     """
-    download images in image collection. Only works for images in the collection that are < 32M
+    Download images in image collection. Only works for images in the collection that are < 32M
     and grid dimension < 10000, documented at 
     https://developers.google.com/earth-engine/apidocs/ee-image-getdownloadurl.
 
     args:
-        ec (ee.ImageCollection): ImageCollection to download.
-        name_prefix (str): name of the zipped_objects.
-        out_dir: (Optional(Path)): pathlib object referring to output dir
-        pool_size: multiprocessing pool size.
+        ic (ee.ImageCollection): ImageCollection to download.
+        name_prefix (str): prefix for the filename of the downloaded objects.
+        out_dir (Optional(Path)): pathlib object referring to output dir.
+        pool_size (int): multiprocessing pool size.
+        download_kwargs (Optional(Dict(str, Any))): keyword arguments used in
+            [getDownloadUrl](https://developers.google.com/earth-engine/apidocs/ee-image-getdownloadurl).
     """
-    ee.Initialize(opt_url='https://earthengine-highvolume.googleapis.com')
+    _batch_download_ic(ic, ee.Image.getDownloadURL, name_prefix, out_dir, pool_size, download_kwargs)
 
-    num_images: int = ic.size().getInfo()
+def download_image_collection_thumb(
+    ic: ee.ImageCollection,
+    name_prefix: str = "ic_",
+    out_dir: Optional[Path] = None,
+    pool_size: int = 25,
+    download_kwargs: Optional[Dict[str, Any]] = None
+) -> None:
+    """
+    Download thumb images in and image collection. Only works for images in the collection that are < 32M
+    and grid dimension < 10000, documented at
+    https://developers.google.com/earth-engine/apidocs/ee-image-getthumburl.
 
-    image_list: ee.List = ic.toList(num_images)
-    
-    pool: multiprocessing.Pool = multiprocessing.Pool(pool_size)
-    pool.starmap(_download_image, zip(range(num_images), repeat(image_list), repeat(name_prefix), repeat(out_dir)))
-
-    pool.close()
-    
-    # Reset to default API url
-    ee.Initialize()
+    args:
+        ic (ee.ImageCollection): ImageCollection to download.
+        name_prefix (str): prefix for the filename of the downloaded objects.
+        out_dir (Optional(Path)): pathlib object referring to output dir.
+        pool_size (int): multiprocessing pool size.
+        download_kwargs (Optional(Dict(str, Any))): keyword arguments used in
+            [getDownloadUrl](https://developers.google.com/earth-engine/apidocs/ee-image-getthumburl).
+    """
+    _batch_download_ic(ic, ee.Image.getThumbURL, name_prefix, out_dir, pool_size, download_kwargs)
