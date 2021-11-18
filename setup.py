@@ -5,7 +5,7 @@ import re
 from setuptools import find_packages
 from setuptools import setup
 
-__version__ = '0.6.1'
+__version__ = '0.8.0'
 
 def read(filename):
     filename = os.path.join(os.path.dirname(__file__), filename)
@@ -29,7 +29,8 @@ setup(
     packages=find_packages(exclude=('tests',)),
 
     install_requires=[
-        "earthengine-api>=0.1.284"
+        "earthengine-api>=0.1.284",
+        "retry>=0.9.2"
     ],
 
     classifiers=[

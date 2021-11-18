@@ -12,21 +12,26 @@ ORIGIN: float = math.pi * 6378137  # earth depth
 C: float = 40075016.686  # earth circumpherence
 PROJECTION: str = "EPSG:3857"
 
+def get_tile_width(zoom: ee.Number) -> ee.Number:
+    zoom: ee.Number = ee.Number(zoom)
+    return ee.Number(C).divide(ee.Number(2).pow(zoom))
 
 def zoom_to_scale(zoom: ee.Number) -> ee.Number:
-    zoom = ee.Number(zoom)
+    zoom: ee.Number = ee.Number(zoom)
+    return get_tile_width.divide(TILE_SIZE)
 
-    tile_width: ee.Number = ee.Number(C).divide(ee.Number(2).pow(zoom))
-    return tile_width.divide(TILE_SIZE)
+def scale_to_zoom(scale: ee.Number) -> ee.Number:
+    scale: ee.Number = ee.Number(scale)
+    return get_tile_width.multiply(TILE_SIZE)
 
 def to_radians(degrees: ee.Number) -> ee.Number:
-    degrees = ee.Number(degrees)
+    degrees: ee.Number = ee.Number(degrees)
 
     return(degrees.multiply(math.pi).divide(180))
 
 def pixels_to_meters(px: ee.Number, py: ee.Number, zoom: ee.Number) -> ee.List:
-    px = ee.Number(px)
-    py = ee.Number(py)
+    px: ee.Number = ee.Number(px)
+    py: ee.Number = ee.Number(py)
     zoom = ee.Number(zoom)
 
     resolution: ee.Number = zoom_to_scale(zoom)
@@ -35,8 +40,8 @@ def pixels_to_meters(px: ee.Number, py: ee.Number, zoom: ee.Number) -> ee.List:
     return ee.List([x, y])
 
 def meters_to_pixels(x: ee.Number, y: ee.Number, zoom: ee.Number) -> ee.List:
-    x = ee.Number(x)
-    y = ee.Number(y)
+    x: ee.Number = ee.Number(x)
+    y: ee.Number = ee.Number(y)
     zoom = ee.Number(zoom)
 
     resolution: ee.Number = zoom_to_scale(zoom)
@@ -45,9 +50,9 @@ def meters_to_pixels(x: ee.Number, y: ee.Number, zoom: ee.Number) -> ee.List:
     return ee.List([px, py])
 
 def degrees_to_tiles(lon: ee.Number, lat: ee.Number, zoom: ee.Number) -> ee.List:
-    lon = ee.Number(lon)
-    lat = ee.Number(lat)
-    zoom = ee.Number(zoom)
+    lon: ee.Number = ee.Number(lon)
+    lat: ee.Number = ee.Number(lat)
+    zoom: ee.Number = ee.Number(zoom)
 
     tx: ee.Number = lon.add(180).divide(360).multiply(ee.Number(2).pow(zoom)).floor()
     ty: ee.Number = ee.Number(1).subtract(
@@ -60,9 +65,9 @@ def degrees_to_tiles(lon: ee.Number, lat: ee.Number, zoom: ee.Number) -> ee.List
     return ee.List([tx, ty])
 
 def get_tile_bounds(tx: ee.Number, ty: ee.Number, zoom: ee.Number) -> ee.List:
-    tx = ee.Number(tx)
-    ty = ee.Number(ty)
-    zoom = ee.Number(zoom)
+    tx: ee.Number = ee.Number(tx)
+    ty: ee.Number = ee.Number(ty)
+    zoom: ee.Number = ee.Number(zoom)
 
     ty_flip: ee.Number = ee.Number(2).pow(zoom).subtract(ty).subtract(1) # TMS -> XYZ, flip y index
     min: ee.Number = pixels_to_meters(ee.Number(tx).multiply(TILE_SIZE), ty_flip.multiply(TILE_SIZE), zoom)
@@ -70,7 +75,7 @@ def get_tile_bounds(tx: ee.Number, ty: ee.Number, zoom: ee.Number) -> ee.List:
     return ee.List([min, max])
 
 def get_tiles_for_geometry(geometry: ee.Geometry, zoom: ee.Number, opt_bounds: Optional[ee.Geometry] = None) -> ee.FeatureCollection:
-    zoom = ee.Number(zoom)
+    zoom: ee.Number = ee.Number(zoom)
 
     bounds: ee.Geometry = ee.Geometry(ee.Algorithms.If(opt_bounds, opt_bounds, geometry))
     bounds_list: ee.List = ee.List(bounds.bounds().coordinates().get(0))
@@ -89,9 +94,9 @@ def get_tiles_for_geometry(geometry: ee.Geometry, zoom: ee.Number, opt_bounds: O
         """
         Add a tile to input tiles
         """
-        tx = ee.Number(tx)
-        ty = ee.Number(ty)
-        zoom = ee.Number(zoom)
+        tx: ee.Number = ee.Number(tx)
+        ty: ee.Number = ee.Number(ty)
+        zoom: ee.Number = ee.Number(zoom)
 
         tile_bounds: ee.List = get_tile_bounds(tx, ty, zoom)
         rect: ee.Geometry = ee.Geometry.Rectangle(tile_bounds, PROJECTION, False)
