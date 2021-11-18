@@ -1,1 +1,2 @@
-earthengine-api==0.1.282
+earthengine-api>=0.1.282
+retry>=0.9.2

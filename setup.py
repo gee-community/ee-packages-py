@@ -28,7 +28,8 @@ setup(
     packages=find_packages(exclude=('tests',)),
 
     install_requires=[
-        "earthengine-api>=0.1.284"
+        "earthengine-api>=0.1.284",
+        "retry>=0.9.2"
     ],
 
     classifiers=[
