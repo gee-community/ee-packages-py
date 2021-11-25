@@ -5,7 +5,7 @@ import re
 from setuptools import find_packages
 from setuptools import setup
 
-__version__ = '0.8.0'
+__version__ = '0.9.0'
 
 def read(filename):
     filename = os.path.join(os.path.dirname(__file__), filename)
