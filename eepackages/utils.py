@@ -1,14 +1,17 @@
-from ctypes import ArgumentError
+from datetime import timedelta
 from itertools import repeat
-import multiprocessing
-import os
-from typing import Any, Callable, Dict, Optional
+import logging
+import math
+from pathlib import Path
 import requests
 import shutil
-from pathlib import Path
-import math
+from time import sleep, time
+from typing import Any, Callable, Dict, Optional
+
 import ee
-import ee
+from pathos import logger
+from pathos.core import getpid
+from pathos.multiprocessing import ProcessPool
 from retry import retry
 
 # /***
@@ -181,13 +184,31 @@ def _download_image(
     download_kwargs: Optional[Dict[str, Any]]
 ) -> None:
     """
-    Hidden function to be used with download_image_collection. For the multiprocessing module, this
-    function must be on the main level in the file (not within function).
+    Hidden function to be used with download_image_collection. As we want compatibility with
+    windows, we need to use dill to pickle the initialized earthengine module. Pathos uses
+    dill to start new processes with its multiprocessing pool, while the python multiprocessing
+    module crashes on windows.
     """
+
     if not out_dir:
         out_dir: Path = Path.cwd() / "output"
     if not download_kwargs:
         download_kwargs: Dict[str, str] = {}
+
+    pid = getpid()
+    log_file: Path = out_dir / "logging" / f"{pid}.log"
+    fh = logging.FileHandler(log_file)
+    fh.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s %(message)s')
+    fh.setFormatter(formatter)
+
+    plogger = logger(level=logging.DEBUG, handler=fh)
+
+    ee_api_url: str = ee.data._cloud_api_base_url
+    ee_hv_url: str = "https://earthengine-highvolume.googleapis.com"
+    if ee_api_url is not ee_hv_url:
+        ee.Initialize(opt_url=ee_hv_url)
+
     img: ee.Image = ee.Image(image_list.get(index))
     url: str = image_download_method(img, download_kwargs)
     r: requests.Response = requests.get(url, stream=True)
@@ -229,7 +250,9 @@ def _download_image(
 
     with open(filename, 'wb') as out_file:
         shutil.copyfileobj(r.raw, out_file)
-    print("Done: ", index)
+    
+    plogger.info(f"Done: {index}")
+    plogger.removeHandler(fh)
 
 
 def _batch_download_ic(
@@ -246,26 +269,28 @@ def _batch_download_ic(
     ee.Image methods.
     """
 
-    if not out_dir.exists():
-        os.mkdir(out_dir)
-
-    ee.Initialize(opt_url='https://earthengine-highvolume.googleapis.com')
+    out_dir.mkdir(exist_ok=True, parents=True)
+    log_dir: Path = out_dir / "logging"
+    log_dir.mkdir(exist_ok=True, parents=True)
 
     num_images: int = ic.size().getInfo()
     image_list: ee.List = ic.toList(num_images)
 
-    with multiprocessing.Pool(pool_size) as pool:
-        pool.starmap(_download_image, zip(
-            range(num_images),
-            repeat(img_download_method),
-            repeat(image_list),
-            repeat(name_prefix),
-            repeat(out_dir),
-            repeat(download_kwargs)
-        ))
+    pool: ProcessPool = ProcessPool(nodes=pool_size)
+    result = pool.amap(_download_image,
+        range(num_images),
+        repeat(img_download_method),
+        repeat(image_list),
+        repeat(name_prefix),
+        repeat(out_dir),
+        repeat(download_kwargs)
+    )
 
-    # Reset to default API url
-    ee.Initialize()
+    start_time: time = time()
+    elapsed: timedelta = timedelta(0)
+    while not result.ready() and elapsed.total_seconds() < 3600:  # 1h timeout
+        sleep(5)
+        elapsed = timedelta(seconds=time() - start_time)
 
 
 def download_image_collection(
