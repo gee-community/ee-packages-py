@@ -113,7 +113,7 @@ def computeSurfaceWaterArea_SingleImage(i, waterbody, scale, waterOccurrence):
     .updateMask(water.unmask(0, False).Not()))
     
   # exclude false-positive, where we're sure in a non-water
-  nonWater = ndwi.lt(-0.15).unmask(0)
+  nonWater = ndwi.lt(-0.15).unmask(0, False)
   waterFill = waterFill.updateMask(nonWater.Not())
   
   fill = (ee.Image.pixelArea().mask(waterFill)
