@@ -46,8 +46,6 @@ def download_image(
     
     image_list: i_ee.List = i_ee.deserializer.fromJSON(serialized_image_list)
 
-    plogger.info(type(image_list))
-
     img: i_ee.Image = i_ee.Image(image_list.get(index))
     url: str = image_download_method(img, download_kwargs)
     r: requests.Response = requests.get(url, stream=True)
