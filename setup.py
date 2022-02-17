@@ -29,6 +29,7 @@ setup(
 
     install_requires=[
         "earthengine-api>=0.1.284",
+        "pathos>=0.2.8",
         "retry>=0.9.2"
     ],
 
