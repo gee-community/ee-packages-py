@@ -1,15 +1,14 @@
-from ctypes import ArgumentError
+from datetime import timedelta
 from itertools import repeat
-import multiprocessing
-import os
-from typing import Any, Callable, Dict, Optional
-import requests
-import shutil
-from pathlib import Path
 import math
+from pathlib import Path
+from time import sleep, time
+from typing import Any, Callable, Dict, Optional
+
 import ee
-import ee
-from retry import retry
+from pathos.multiprocessing import ProcessPool
+
+from eepackages.multiprocessing.download_image import download_image
 
 # /***
 #  * The script computes surface water mask using Canny Edge detector and Otsu thresholding
@@ -171,67 +170,6 @@ def focalMaxWeight(image: ee.Image, radius: float):
     return dilation
 
 
-@retry(tries=10, delay=5, backoff=10)
-def _download_image(
-    index: int,
-    image_download_method: Callable,
-    image_list: ee.List,
-    name_prefix: str,
-    out_dir: Optional[Path],
-    download_kwargs: Optional[Dict[str, Any]]
-) -> None:
-    """
-    Hidden function to be used with download_image_collection. For the multiprocessing module, this
-    function must be on the main level in the file (not within function).
-    """
-    if not out_dir:
-        out_dir: Path = Path.cwd() / "output"
-    if not download_kwargs:
-        download_kwargs: Dict[str, str] = {}
-    img: ee.Image = ee.Image(image_list.get(index))
-    url: str = image_download_method(img, download_kwargs)
-    r: requests.Response = requests.get(url, stream=True)
-
-    # File format chain
-    format: Optional[str] = download_kwargs.get("format")
-    if format:
-        if format == "GEO_TIFF":
-            extention: str = ".tif"
-        elif format == "NPY":
-            extention: str = ".npy"
-        elif format == "PNG":
-            extention: str = ".png"
-        elif format == "JPG":
-            extention: str = ".jpg"
-        else:
-            extention: str = ".tif.zip"
-    elif image_download_method == ee.Image.getDownloadURL:
-        extention: str = ".tif.zip"
-    elif image_download_method == ee.Image.getThumbURL:
-        extention: str = ".png"
-    else:
-        raise RuntimeError(
-            f"image download method {image_download_method} unknown.")
-
-    # Image naming chain
-    img_props: Dict[str, Any] = img.getInfo()['properties']
-    t0: Optional[int] = img_props.get("system:time_start")
-    img_index: Optional[int] = img_props.get("system:index")
-    if t0:
-        file_id: str = t0
-    elif img_index:
-        file_id: str = img_index
-    else:
-        file_id: str = index
-
-    # File name
-    filename: Path = out_dir / f"{name_prefix}{file_id}{extention}"
-
-    with open(filename, 'wb') as out_file:
-        shutil.copyfileobj(r.raw, out_file)
-    print("Done: ", index)
-
-
 def _batch_download_ic(
     ic: ee.ImageCollection,
     img_download_method: Callable,
@@ -246,27 +184,37 @@ def _batch_download_ic(
     ee.Image methods.
     """
 
-    if not out_dir.exists():
-        os.mkdir(out_dir)
-
-    ee.Initialize(opt_url='https://earthengine-highvolume.googleapis.com')
+    out_dir.mkdir(exist_ok=True, parents=True)
+    log_dir: Path = out_dir / "logging"
+    log_dir.mkdir(exist_ok=True, parents=True)
 
     num_images: int = ic.size().getInfo()
     image_list: ee.List = ic.toList(num_images)
 
-    with multiprocessing.Pool(pool_size) as pool:
-        pool.starmap(_download_image, zip(
-            range(num_images),
-            repeat(img_download_method),
-            repeat(image_list),
-            repeat(name_prefix),
-            repeat(out_dir),
-            repeat(download_kwargs)
-        ))
+    serialized_il: str = image_list.serialize()
 
-    # Reset to default API url
-    ee.Initialize()
+    pool: ProcessPool = ProcessPool(nodes=pool_size)
+    result = pool.amap(download_image,
+        repeat(ee),
+        range(num_images),
+        repeat(img_download_method),
+        repeat(serialized_il),
+        repeat(name_prefix),
+        repeat(out_dir),
+        repeat(download_kwargs)
+    )
 
+    start_time: time = time()
+    elapsed: timedelta = timedelta(0)
+    result.get()  # needed to trigger execution?
+
+    while not result.ready() and elapsed.total_seconds() < 3600:  # 1h timeout
+        sleep(5)
+        elapsed = timedelta(seconds=time() - start_time)
+
+    pool.close()
+    pool.join()
+    pool.clear()
 
 def download_image_collection(
     ic: ee.ImageCollection,

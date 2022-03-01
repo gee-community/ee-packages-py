@@ -5,7 +5,7 @@ import re
 from setuptools import find_packages
 from setuptools import setup
 
-__version__ = '0.12.0'
+__version__ = '0.13.1'
 
 def read(filename):
     filename = os.path.join(os.path.dirname(__file__), filename)
@@ -30,6 +30,7 @@ setup(
 
     install_requires=[
         "earthengine-api>=0.1.284",
+        "pathos>=0.2.8",
         "retry>=0.9.2"
     ],
 
