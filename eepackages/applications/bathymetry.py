@@ -397,7 +397,7 @@ class Bathymetry(object):
         images: ee.ImageCollection = assets.getImages(bounds, options_get_images)
 
         options_get_mostly_clean_images: Dict[str, Any] = {
-            "cloudFrequencyThresholdData": cloud_frequency_threshold_delta
+            "cloudFrequencyThresholdDelta": cloud_frequency_threshold_delta
         }
 
         return assets.getMostlyCleanImages(images, bounds, options_get_mostly_clean_images)
