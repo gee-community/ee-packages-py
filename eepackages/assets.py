@@ -46,7 +46,12 @@ def getImages(g, options):
     
     if options and 's2MergeByTime' in options:
         s2MergeByTime = options['s2MergeByTime']
-    
+
+    s2TimeMerger = False
+
+    if options and 's2TimeMerger' in options:
+        s2TimeMerger = options['s2TimeMerger']
+
     cloudMask = False
     
     if options and 'cloudMask' in options:
@@ -200,7 +205,7 @@ def getImages(g, options):
 
     # merge by time (remove duplicates)
     if s2MergeByTime:
-        s2 = mosaicByTime(s2)
+        s2 = mosaicByTime(s2, s2TimeMerger)
 
     def f2(i):
         return (i
@@ -309,8 +314,17 @@ def getImages(g, options):
 #  * 
 #  * This function mosaics images by time.
 #  */
-def mosaicByTime(images):
-    TIME_FIELD = 'system:time_start'
+def mosaicByTime(images, *args):
+    if 'dd' in args: # for rounding up until days
+        def f(i):
+            dateField = ee.Date(i.get('system:time_start')).format('YYYYMMdd') #hhmmss.SSS rounded to a minute
+            return i.set({'dateField':dateField})
+
+        images = images.map(f)
+        
+        TIME_FIELD = 'dateField'
+    else:
+        TIME_FIELD = 'system:time_start'
 
     distinct = images.distinct([TIME_FIELD])
 
