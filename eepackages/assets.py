@@ -337,7 +337,7 @@ def mosaicByTime(images, *args):
         matchedImages = ee.ImageCollection.fromImages(i.get('matches'))
         mosaic = matchedImages.sort('system:index').mosaic().set({ 'system:footprint': matchedImages.geometry() })
         
-        return mosaic.copyProperties(i).set(TIME_FIELD, i.get(TIME_FIELD))
+        return mosaic.copyProperties(i).set('system:time_start', i.get('system:time_start')) # hard-coded time_start instead of TIME_FIELD to be consistent
     
     results = results.map(merge_matches)
     
