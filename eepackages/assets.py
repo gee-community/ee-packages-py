@@ -16,7 +16,7 @@ def cloudMaskAlgorithms_S2(image):
     cirrusBitMask = 1 << 11
     # Both flags should be set to zero, indicating clear conditions.
     mask = qa.bitwiseAnd(cloudBitMask).eq(0).And(qa.bitwiseAnd(cirrusBitMask).eq(0))
-    mask = mask.rename('cloud')
+    mask = mask.subtract(1).multiply(-1).rename('cloud')
     return image.addBands(mask)
 
 cloudMaskAlgorithms = {
