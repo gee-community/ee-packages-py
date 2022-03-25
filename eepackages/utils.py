@@ -73,36 +73,44 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
     edge = ee.Algorithms.CannyEdgeDetector(image, cannyThreshold, cannySigma)
     edge = edge.multiply(mask)
 
-    if minEdgeLength:
-        connected = edge.mask(edge).lt(
-            cannyThreshold).connectedPixelCount(200, True)
-
-        edgeLong = connected.gte(minEdgeLength)
-
+    def filter_small_edge_length(e, canny_threshold, min_edge_length):
+        connected = e.mask(e).lt(
+            canny_threshold).connectedPixelCount(200, True)
         # if debug:
         #  print('Edge length: ', ui.Chart.image.histogram(connected, bounds, scale, buckets))
         #  Map.addLayer(edge.mask(edge), {palette:['ff0000']}, 'edges (short)', false);
+        return connected.gte(min_edge_length)
 
-        edge = edgeLong
+    edge = ee.Image(ee.Algorithms.If(
+        minEdgeLength,
+        filter_small_edge_length(edge, cannyThreshold, minEdgeLength),
+        edge
+    ))
 
     #  buffer around NDWI edges
     edgeBuffer = edge.focal_max(ee.Number(scale), 'square', 'meters')
 
-    if minEdgeValue:
-        edgeMin = image.reduceNeighborhood(
-            ee.Reducer.min(), ee.Kernel.circle(ee.Number(scale), 'meters'))
-
-        edgeBuffer = edgeBuffer.updateMask(edgeMin.gt(minEdgeValue))
+    def filter_small_edge_values(i, edge_buffer, sc, min_edge_value):
+        edgeMin = i.reduceNeighborhood(
+            ee.Reducer.min(), ee.Kernel.circle(ee.Number(sc), 'meters'))
 
         # if debug:
         #  Map.addLayer(edge.updateMask(edgeBuffer), {palette:['ff0000']}, 'edge min', false);
 
-    if minEdgeGradient:
-        edgeGradient = image.gradient().abs().reduce(
-            ee.Reducer.max()).updateMask(edgeBuffer.mask())
+        return edge_buffer.updateMask(edgeMin.gt(min_edge_value))
+    
+    edgeBuffer = ee.Image(ee.Algorithms.If(
+        minEdgeValue,
+        filter_small_edge_values(image, edgeBuffer, scale, minEdgeValue),
+        edgeBuffer
+    ))
 
-        edgeGradientTh = ee.Number(edgeGradient.reduceRegion(
-            ee.Reducer.percentile([minEdgeGradient]), bounds, scale).values().get(0))
+    def filter_small_edge_gradient(i, edge_buffer, bnds, sc, min_edge_gradient):
+        edge_gradient = i.gradient().abs().reduce(
+            ee.Reducer.max()).updateMask(edge_buffer.mask())
+
+        edge_gradient_th = ee.Number(edge_gradient.reduceRegion(
+            ee.Reducer.percentile([min_edge_gradient]), bnds, sc).values().get(0))
 
         # if debug:
         #  print('Edge gradient threshold: ', edgeGradientTh)
@@ -111,7 +119,14 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
 
         #  print('Edge gradient: ', ui.Chart.image.histogram(edgeGradient, bounds, scale, buckets))
 
-        edgeBuffer = edgeBuffer.updateMask(edgeGradient.gt(edgeGradientTh))
+        return edge_buffer.updateMask(edge_gradient.gt(edge_gradient_th))
+
+
+    edgeBuffer = ee.Image(ee.Algorithms.If(
+        minEdgeGradient,
+        filter_small_edge_gradient(image, edgeBuffer, bounds, scale, minEdgeGradient),
+        edgeBuffer
+    ))
 
     edge = edge.updateMask(edgeBuffer)
     edgeBuffer = edge.focal_max(
@@ -130,7 +145,7 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
         'bucketMeans'), otsu(hist), minValue)
     threshold = ee.Number(threshold)
 
-    if debug:
+    # if debug:
         # // experimental
         # // var jrc = ee.Image('JRC/GSW1_0/GlobalSurfaceWater').select('occurrence')
         # // var jrcTh = ee.Number(ee.Dictionary(jrc.updateMask(edge).reduceRegion(ee.Reducer.mode(), bounds, scale)).values().get(0))
@@ -140,16 +155,15 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
 
         # Map.addLayer(edge.mask(edge), {palette:['ff0000']}, 'edges', true);
 
-        print('Threshold: ', threshold)
+        # print('Threshold: ', threshold)
 
         # print('Image values:', ui.Chart.image.histogram(image, bounds, scale, buckets));
         # print('Image values (edge): ', ui.Chart.image.histogram(imageEdge, bounds, scale, buckets));
         # Map.addLayer(mask.mask(mask), {palette:['000000']}, 'image mask', false);
 
-    if minValue is not None:
-        return threshold.max(minValue)
-    else:
-        return threshold
+    threshold_ret = ee.Number(ee.Algorithms.If(minValue, threshold.max(minValue), threshold))
+
+    return threshold_ret
 
 
 def focalMin(image: ee.Image, radius: float):
