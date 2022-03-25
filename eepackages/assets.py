@@ -4,13 +4,10 @@ from eepackages import utils
 
 # migrated from JavaScript users/gena/packages/assets.js
 
-def cloudMaskAlgorithms_L8(image):
-    qa = image.select('BQA')
-    # /// Check that the cloud bit is off.
-    # // See https://www.usgs.gov/land-resources/nli/landsat/landsat-collection-1-level-1-quality-assessment-band
-    mask = qa.bitwiseAnd(1 << 4).eq(0)
-        
-    return image.addBands(mask.rename('cloud'))
+def cloudMaskAlgorithms_Landsat(image):
+    imageWithCloud = ee.Algorithms.Landsat.simpleCloudScore(ee.Image(image))
+    
+    return imageWithCloud.addBands(ee.Image(imageWithCloud.select('cloud').divide(100)), None, True)
 
 def cloudMaskAlgorithms_S2(image):
     qa = image.select('QA60')
@@ -22,19 +19,12 @@ def cloudMaskAlgorithms_S2(image):
     mask = mask.rename('cloud')
     return image.addBands(mask)
 
-def cloudMaskAlgorithms_Dummy(image):
-    cloudMask = ee.Image.constant(0).rename('cloud')
-    
-    # TODO: implement cloud masking
-    
-    return image.addBands(cloudMask)
-
 cloudMaskAlgorithms = {
-    'L8': cloudMaskAlgorithms_L8,
+    'L8': cloudMaskAlgorithms_Landsat,
     'S2': cloudMaskAlgorithms_S2,
-    'L7': cloudMaskAlgorithms_Dummy,
-    'L5': cloudMaskAlgorithms_Dummy,
-    'L4': cloudMaskAlgorithms_Dummy
+    'L7': cloudMaskAlgorithms_Landsat,
+    'L5': cloudMaskAlgorithms_Landsat,
+    'L4': cloudMaskAlgorithms_Landsat
 }
 
 def getImages(g, options):
@@ -74,13 +64,13 @@ def getImages(g, options):
 
     if options and 'includeTemperature' in options:
         bands['L8']['from'].append('B10')
-        bands['L8']['to'].push('temp')
-        bands['L5']['from'].push('B6')
-        bands['L5']['to'].push('temp')
-        bands['L4']['from'].push('B6')
-        bands['L4']['to'].push('temp')
-        bands['L7']['from'].push('B6_VCID_1')
-        bands['L7']['to'].push('temp')
+        bands['L8']['to'].append('temp')
+        bands['L5']['from'].append('B6')
+        bands['L5']['to'].append('temp')
+        bands['L4']['from'].append('B6')
+        bands['L4']['to'].append('temp')
+        bands['L7']['from'].append('B6_VCID_1')
+        bands['L7']['to'].append('temp')
 
     # used only for a single sensor
     if options and 'bandsAll' in options:
@@ -114,8 +104,8 @@ def getImages(g, options):
 
     if cloudMask:
         l8 = l8.map(cloudMaskAlgorithms_['L8'])
-        bands['L8']['from'].push('cloud')
-        bands['L8']['to'].push('cloud')
+        bands['L8']['from'].append('cloud')
+        bands['L8']['to'].append('cloud')
 
     l8 = l8.select(bands['L8']['from'], bands['L8']['to'])
     
