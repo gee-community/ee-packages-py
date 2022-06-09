@@ -12,17 +12,15 @@ ORIGIN: float = math.pi * 6378137  # earth depth
 C: float = 40075016.686  # earth circumpherence
 PROJECTION: str = "EPSG:3857"
 
-def get_tile_width(zoom: ee.Number) -> ee.Number:
-    zoom: ee.Number = ee.Number(zoom)
-    return ee.Number(C).divide(ee.Number(2).pow(zoom))
 
 def zoom_to_scale(zoom: ee.Number) -> ee.Number:
     zoom: ee.Number = ee.Number(zoom)
-    return get_tile_width.divide(TILE_SIZE)
+    return ee.Number(C).divide(ee.Number(2).pow(zoom)).divide(TILE_SIZE)
 
 def scale_to_zoom(scale: ee.Number) -> ee.Number:
     scale: ee.Number = ee.Number(scale)
-    return get_tile_width.multiply(TILE_SIZE)
+    zoom: ee.Number = ee.Number(C).divide(scale.multiply(TILE_SIZE)).log().divide(ee.Number(2).log())
+    return zoom.ceil()
 
 def to_radians(degrees: ee.Number) -> ee.Number:
     degrees: ee.Number = ee.Number(degrees)
