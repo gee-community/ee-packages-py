@@ -30,6 +30,7 @@ class Bathymetry(object):
         pansharpen: bool = False,
         skip_neighborhood_search: bool = False,
         bounds_buffer: int = 10000,
+        s2merge: Optional[str] = None,
     ) -> ee.Image:
         images: ee.ImageCollection = self.get_images(
             bounds=bounds,
@@ -38,7 +39,8 @@ class Bathymetry(object):
             filter_masked=filter_masked,
             scale=scale,
             missions=missions,
-            cloud_frequency_threshold_delta=cloud_frequency_threshold_data
+            cloud_frequency_threshold_delta=cloud_frequency_threshold_data,
+            s2merge=s2merge
         )
         # save loaded images in class as raw_images
         self._raw_images = images
@@ -377,7 +379,8 @@ class Bathymetry(object):
         missions: List[str],
         filter_masked_fraction: Optional[float] = None,
         cloud_frequency_threshold_delta: float = 0.15,
-        filter: Optional[ee.Filter] = None
+        filter: Optional[ee.Filter] = None,
+        s2merge: Optional[str] = None,
     ) -> ee.ImageCollection:
         date_filter: ee.Filter = ee.Filter.date(start, stop)
         if filter:
@@ -391,7 +394,8 @@ class Bathymetry(object):
             "filterMasked": filter_masked,
             "filterMaskedFraction": filter_masked_fraction,
             "scale": ee.Number(scale).multiply(10),  # why *10?
-            "resample": True
+            "resample": True,
+            "s2TimeMerger": s2merge,
         }
 
         images: ee.ImageCollection = assets.getImages(bounds, options_get_images)
