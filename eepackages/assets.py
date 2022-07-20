@@ -79,7 +79,7 @@ def getImages(g, options):
             'to': ['swir', 'nir', 'green', 'blue', 'red', 'red2', 'red3', 'red4', 'nir2', 'water_vapour', 'cirrus']
         }
 
-    s2 = ee.ImageCollection('COPERNICUS/S2').filterBounds(g)
+    s2 = ee.ImageCollection('COPERNICUS/S2_HARMONIZED').filterBounds(g)
 
     if options and 'filter' in options:
         s2 = s2.filter(options['filter'])
