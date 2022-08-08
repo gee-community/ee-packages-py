@@ -29,6 +29,7 @@ class Bathymetry(object):
         cloud_frequency_threshold_data: float = 0.15,
         pansharpen: bool = False,
         skip_neighborhood_search: bool = False,
+        skip_scene_boundary_fix: bool = False,
         bounds_buffer: int = 10000,
     ) -> ee.Image:
         images: ee.ImageCollection = self.get_images(
@@ -51,11 +52,20 @@ class Bathymetry(object):
             bounds=bounds,
             scale=scale,
             pansharpen=pansharpen,
-            skip_neighborhood_search=skip_neighborhood_search
+            skip_neighborhood_search=skip_neighborhood_search,
+            skip_scene_boundary_fix=skip_scene_boundary_fix
         )
 
 
-    def _compute_inverse_depth(self, images: ee.ImageCollection, bounds, scale: int, pansharpen: bool, skip_neighborhood_search: bool) -> ee.Image:
+    def _compute_inverse_depth(
+        self,
+        images: ee.ImageCollection,
+        bounds,
+        scale: int,
+        pansharpen: bool,
+        skip_neighborhood_search: bool,
+        skip_scene_boundary_fix: bool
+        ) -> ee.Image:
         bands: List[str] = ["red", "green", "blue"]
         green_max: float = 0.4
 
@@ -126,6 +136,24 @@ class Bathymetry(object):
                     "dilation": 0,
                     "weight": 200
                 })
+        
+        def fix_scene_boundaries(image: ee.Image) -> ee.Image:
+            weight: ee.Image = image.select("weight")
+            mask = image.select(0).mask()
+
+            mask: ee.Image = utils.focalMin(mask, 10) \
+                .reproject(ee.Projection("EPSG:3857").atScale(scale)).resample("bicubic")
+            mask = utils.focalMaxWeight(mask.Not(), 10) \
+                .reproject(ee.Projection("EPSG:3857").atScale(scale)).resample("bicubic")
+            mask = ee.Image.constant(1).subtract(mask)
+
+            weight = weight.multiply(mask)
+
+            return image.addBands(weight, None, True)
+
+        if not skip_scene_boundary_fix:
+            images = images.map(fix_scene_boundaries)
+          
 
         def image_map_func(i: ee.Image):
             t: str = i.get("system:time_start")
