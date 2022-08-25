@@ -2,171 +2,222 @@ import ee
 from eepackages import assets
 from eepackages import utils
 
-def computeSurfaceWaterArea(waterbody, start_filter, start, stop, scale, waterOccurrence, opt_missions):
-  geom = ee.Feature(waterbody).geometry()
-  
-  missions = ['L4', 'L5', 'L7', 'L8', 'S2']
 
-  if opt_missions:
-    missions = opt_missions
-  
-  images = assets.getImages(geom, {
-    'resample': True,
-    'filter': ee.Filter.date(start_filter, stop),
-    'missions': missions,
-    'scale': scale * 10
-  })
-  
-  # print('Image count: ', images.size())
-  
-  options = {
-      # 'cloudFrequencyThresholdDelta': -0.15
-     'scale': scale * 5
-  }
+def computeSurfaceWaterArea(
+    waterbody, start_filter, start, stop, scale, waterOccurrence, opt_missions
+):
+    geom = ee.Feature(waterbody).geometry()
 
-  g = geom.buffer(300, scale)
+    missions = ["L4", "L5", "L7", "L8", "S2"]
 
-  # images = assets.getMostlyCleanImages(images, g, options).sort('system:time_start')
-  # images = images.filterDate(start, stop)
+    if opt_missions:
+        missions = opt_missions
 
-  # all images, but with quality score
-  images = (assets.addQualityScore(images, g, options)
-    .filter(ee.Filter.gt('quality_score', 0))) # sometimes null?!
+    images = assets.getImages(
+        geom,
+        {
+            "resample": True,
+            "filter": ee.Filter.date(start_filter, stop),
+            "missions": missions,
+            "scale": scale * 10,
+        },
+    )
+
+    # print('Image count: ', images.size())
+
+    options = {
+        # 'cloudFrequencyThresholdDelta': -0.15
+        "scale": scale
+        * 5
+    }
+
+    g = geom.buffer(300, scale)
+
+    # images = assets.getMostlyCleanImages(images, g, options).sort('system:time_start')
+    # images = images.filterDate(start, stop)
+
+    # all images, but with quality score
+    images = assets.addQualityScore(images, g, options).filter(
+        ee.Filter.gt("quality_score", 0)
+    )  # sometimes null?!
+
+    # print('Image count (clean): ', images.size())
+
+    water = images.map(
+        lambda i: computeSurfaceWaterArea_SingleImage(
+            i, waterbody, scale, waterOccurrence
+        )
+    )
+
+    water = water.filter(ee.Filter.neq("area", 0))
+
+    return water
 
 
-  # print('Image count (clean): ', images.size())
+def computeSurfaceWaterArea_SingleImage(
+    i, waterbody, scale, waterOccurrence, fillPercentiles=None
+):
+    geom = ee.Feature(waterbody).geometry()
+    if fillPercentiles is None:
+        fillPercentiles = [5, 50, 95]  # we don't trust our prior
+    fillPercentilesStr = list(map(lambda n: str(n), fillPercentiles))
 
-  water = images.map(
-    lambda i: computeSurfaceWaterArea_SingleImage(i, waterbody, scale, waterOccurrence))
-  
-  water = water.filter(ee.Filter.neq('area', 0))
+    ndwiBands = ["green", "swir"]
+    # var ndwiBands = ['green', 'nir']
 
-  return water
+    waterMaxImage = ee.Image().float().paint(waterbody.buffer(150), 1)
 
-def computeSurfaceWaterArea_SingleImage(i, waterbody, scale, waterOccurrence, fillPercentiles=None):
-  geom = ee.Feature(waterbody).geometry()
-  if fillPercentiles is None:
-    fillPercentiles = [5, 50, 95]  # we don't trust our prior
-  fillPercentilesStr = list(map(lambda n: str(n), fillPercentiles))
+    # maxArea = waterbody.area(scale)
 
-  ndwiBands = ['green', 'swir']
-  # var ndwiBands = ['green', 'nir'] 
+    t = i.get("system:time_start")
 
-  waterMaxImage = ee.Image().float().paint(waterbody.buffer(150), 1)
-  
-  # maxArea = waterbody.area(scale)
+    i = i.updateMask(waterMaxImage).updateMask(
+        i.select("swir").min(i.select("nir")).gt(0.001)
+    )
 
-  t = i.get('system:time_start')
-  
-  i = (i
-    .updateMask(waterMaxImage)
-    .updateMask(i.select('swir').min(i.select('nir')).gt(0.001)))
-  
-  ndwi = i.normalizedDifference(ndwiBands)
+    ndwi = i.normalizedDifference(ndwiBands)
 
-  # var water = ndwi.gt(0)
+    # var water = ndwi.gt(0)
 
-  th = utils.computeThresholdUsingOtsu(ndwi, scale, geom, 0.5, 0.7, -0.2)
-  water = ndwi.gt(th)
-  
-  area = (ee.Image.pixelArea().mask(water)
-    .reduceRegion(**{
-      'reducer': ee.Reducer.sum(),
-      'geometry': geom,
-      'scale': scale
-    }).get('area'))
+    th = utils.computeThresholdUsingOtsu(ndwi, scale, geom, 0.5, 0.7, -0.2)
+    water = ndwi.gt(th)
 
-  # # fill missing, estimate water probability as the lowest percentile.
-  # var waterEdge = ee.Algorithms.CannyEdgeDetector(water, 0.1, 0)
-  waterEdge = ee.Algorithms.CannyEdgeDetector(ndwi, 0.5, 0.7)
-  
-  # image mask
-  imageMask = ndwi.mask()
-  
-  # var imageMask = i.select(ndwiBands).reduce(ee.Reducer.allNonZero())
-  
-  # imageMask = utils.focalMin(imageMask, ee.Number(scale) * 1.5)
-  imageMask = imageMask.focal_min(ee.Number(scale).multiply(1.5), 'square', 'meters')
-    #.multiply(waterMaxImage)
+    area = (
+        ee.Image.pixelArea()
+        .mask(water)
+        .reduceRegion(**{"reducer": ee.Reducer.sum(), "geometry": geom, "scale": scale})
+        .get("area")
+    )
 
-  # TODO: exclude non-water/missing boundsry
-  waterEdge = waterEdge.updateMask(imageMask)
+    # # fill missing, estimate water probability as the lowest percentile.
+    # var waterEdge = ee.Algorithms.CannyEdgeDetector(water, 0.1, 0)
+    waterEdge = ee.Algorithms.CannyEdgeDetector(ndwi, 0.5, 0.7)
 
-  # # clip by clouds
-  # var bad = ee.Image(1).float().subtract(i.select('weight'))
-  # bad = utils.focalMax(bad, 90).not()
-  # waterEdge = waterEdge.updateMask(bad)
+    # image mask
+    imageMask = ndwi.mask()
 
-  # get water probability around edges
-  # P(D|W) = P(D|W) * P(W) / P(D) ~=  P(D|W) * P(W)
-  pValues = waterOccurrence.mask(waterEdge).reduceRegion(**{
-    'reducer': ee.Reducer.percentile(fillPercentiles),
-    'geometry': geom,
-    'scale': scale
-  }).values()
-  
-  # TODO: exclude edges belonging to cloud/water or cloud/land
-    
-  pValues = pValues.map(lambda p: ee.Algorithms.If(ee.Algorithms.IsEqual(p, None), 101, p))
-  pValuesDict = ee.Dictionary(ee.List(fillPercentilesStr) \
-        .map(lambda s: ee.String("p").cat(ee.String(s))).zip(pValues).flatten())
-  i = i.set(pValuesDict)
+    # var imageMask = i.select(ndwiBands).reduce(ee.Reducer.allNonZero())
 
-  waterFills = pValues.map(lambda p: (waterOccurrence.gt(ee.Image.constant(p))
-        .updateMask(water.unmask(0, False).Not())))
-    
-  # exclude false-positive, where we're sure in a non-water
-  nonWater = ndwi.lt(-0.15).unmask(0, False)
-  # waterFill = waterFill.updateMask(nonWater.Not())
-  waterFills = waterFills.map(lambda wf: ee.Image(wf).updateMask(nonWater.Not()))
+    # imageMask = utils.focalMin(imageMask, ee.Number(scale) * 1.5)
+    imageMask = imageMask.focal_min(ee.Number(scale).multiply(1.5), "square", "meters")
+    # .multiply(waterMaxImage)
 
-  # create an image with water fills as bands
-  waterFillsBands = ee.ImageCollection(waterFills).toBands().rename(list(map(lambda s: f"water_fill_{s}", fillPercentilesStr)))
-  
-  fills = waterFills.map(lambda wf: (ee.Image.pixelArea().mask(wf)
-    .reduceRegion(**{
-      'reducer': ee.Reducer.sum(),
-      'geometry': geom,
-      'scale': scale
-    }).get('area')))
-    
-  areasFilled = fills.map(lambda f: ee.Number(area).add(f))
-  areasFilledDict = ee.Dictionary(ee.List(fillPercentilesStr) \
-        .map(lambda s: ee.String("area_filled_p").cat(s)).zip(areasFilled).flatten())
-  i = i.set(areasFilledDict)
+    # TODO: exclude non-water/missing boundsry
+    waterEdge = waterEdge.updateMask(imageMask)
 
-  filledFractions = ee.Array(fills).divide(ee.Array(areasFilled)).toList()
-  filledFractionsDict = ee.Dictionary(ee.List(fillPercentilesStr) \
-    .map(lambda s: ee.String("filled_fraction_p").cat(s)).zip(ee.List(filledFractions)).flatten())
-  i = i.set(filledFractionsDict)
+    # # clip by clouds
+    # var bad = ee.Image(1).float().subtract(i.select('weight'))
+    # bad = utils.focalMax(bad, 90).not()
+    # waterEdge = waterEdge.updateMask(bad)
 
-  return (i
-    .addBands(waterEdge.rename('water_edge'))
-    .addBands(ndwi.rename('ndwi'))
-    .addBands(water.rename('water'))
-    .addBands(waterFillsBands)
-    .set({ 
-      'area': area,
-      'system:time_start': t,
-      'ndwi_threshold': th,
-      'waterOccurrenceExpected': waterOccurrence.mask(waterEdge)
-  }))
+    # get water probability around edges
+    # P(D|W) = P(D|W) * P(W) / P(D) ~=  P(D|W) * P(W)
+    pValues = (
+        waterOccurrence.mask(waterEdge)
+        .reduceRegion(
+            **{
+                "reducer": ee.Reducer.percentile(fillPercentiles),
+                "geometry": geom,
+                "scale": scale,
+            }
+        )
+        .values()
+    )
+
+    # TODO: exclude edges belonging to cloud/water or cloud/land
+
+    pValues = pValues.map(
+        lambda p: ee.Algorithms.If(ee.Algorithms.IsEqual(p, None), 101, p)
+    )
+    pValuesDict = ee.Dictionary(
+        ee.List(fillPercentilesStr)
+        .map(lambda s: ee.String("p").cat(ee.String(s)))
+        .zip(pValues)
+        .flatten()
+    )
+    i = i.set(pValuesDict)
+
+    waterFills = pValues.map(
+        lambda p: (
+            waterOccurrence.gt(ee.Image.constant(p)).updateMask(
+                water.unmask(0, False).Not()
+            )
+        )
+    )
+
+    # exclude false-positive, where we're sure in a non-water
+    nonWater = ndwi.lt(-0.15).unmask(0, False)
+    # waterFill = waterFill.updateMask(nonWater.Not())
+    waterFills = waterFills.map(lambda wf: ee.Image(wf).updateMask(nonWater.Not()))
+
+    # create an image with water fills as bands
+    waterFillsBands = (
+        ee.ImageCollection(waterFills)
+        .toBands()
+        .rename(list(map(lambda s: f"water_fill_{s}", fillPercentilesStr)))
+    )
+
+    fills = waterFills.map(
+        lambda wf: (
+            ee.Image.pixelArea()
+            .mask(wf)
+            .reduceRegion(
+                **{"reducer": ee.Reducer.sum(), "geometry": geom, "scale": scale}
+            )
+            .get("area")
+        )
+    )
+
+    areasFilled = fills.map(lambda f: ee.Number(area).add(f))
+    areasFilledDict = ee.Dictionary(
+        ee.List(fillPercentilesStr)
+        .map(lambda s: ee.String("area_filled_p").cat(s))
+        .zip(areasFilled)
+        .flatten()
+    )
+    i = i.set(areasFilledDict)
+
+    filledFractions = ee.Array(fills).divide(ee.Array(areasFilled)).toList()
+    filledFractionsDict = ee.Dictionary(
+        ee.List(fillPercentilesStr)
+        .map(lambda s: ee.String("filled_fraction_p").cat(s))
+        .zip(ee.List(filledFractions))
+        .flatten()
+    )
+    i = i.set(filledFractionsDict)
+
+    return (
+        i.addBands(waterEdge.rename("water_edge"))
+        .addBands(ndwi.rename("ndwi"))
+        .addBands(water.rename("water"))
+        .addBands(waterFillsBands)
+        .set(
+            {
+                "area": area,
+                "system:time_start": t,
+                "ndwi_threshold": th,
+                "waterOccurrenceExpected": waterOccurrence.mask(waterEdge),
+            }
+        )
+    )
+
 
 def computeSurfaceWaterAreaJRC(waterbody, start, stop, scale):
-  geom = ee.Feature(waterbody).geometry()
-  
-  jrcMonthly = ee.ImageCollection("JRC/GSW1_0/MonthlyHistory")
+    geom = ee.Feature(waterbody).geometry()
 
-  def compute_area(i):
-    area = ee.Image.pixelArea().mask(i.eq(2)).reduceRegion({
-      'reducer': ee.Reducer.sum(), 
-      'geometry': geom, 
-      'scale': scale
-    })
+    jrcMonthly = ee.ImageCollection("JRC/GSW1_0/MonthlyHistory")
 
-    return i.set({'area': area.get('area')})
+    def compute_area(i):
+        area = (
+            ee.Image.pixelArea()
+            .mask(i.eq(2))
+            .reduceRegion(
+                {"reducer": ee.Reducer.sum(), "geometry": geom, "scale": scale}
+            )
+        )
 
-  water = jrcMonthly.filterDate(start, stop).map(compute_area)
+        return i.set({"area": area.get("area")})
 
-  return water
+    water = jrcMonthly.filterDate(start, stop).map(compute_area)
 
+    return water
