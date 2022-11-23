@@ -354,7 +354,7 @@ def addQualityScore(images, g, options):
 
     return images.map(add_quality_score)
 
-def getMostlyCleanImages(images, g, options):
+def getMostlyCleanImages(images, g, options=None):
     g = ee.Geometry(g)
     
     scale = 500
@@ -368,31 +368,45 @@ def getMostlyCleanImages(images, g, options):
         p = options['percentile']
 
     # // http://www.earthenv.org/cloud
-    modisClouds = ee.Image('users/gena/MODCF_meanannual')
+    modis_clouds = ee.Image('users/gena/MODCF_meanannual')
     
-    cloudFrequency = (modisClouds.divide(10000).reduceRegion(
-        ee.Reducer.percentile([p]), 
-        g.buffer(10000, ee.Number(scale).multiply(10)), ee.Number(scale).multiply(10)).values().get(0))
-        
-    # print('Cloud frequency (over AOI):', cloudFrequency)
+    # If cloud frequency already known for waterbody
+    if options and options.get('cloud_frequency'):
+        cloud_frequency = ee.Number(options['cloud_frequency'])
+    else:
+        cloud_frequency = modis_clouds.divide(10000).reduceRegion(
+            ee.Reducer.percentile([p]), 
+            g.buffer(10000, ee.Number(scale).multiply(10)),
+            ee.Number(scale).multiply(10)
+        ).values().get(0)
     
-    #    decrease cloudFrequency, include some more partially-cloudy images then clip based on a quality metric
-    #    also assume inter-annual variability of the cloud cover
-    cloudFrequency = ee.Number(cloudFrequency).subtract(0.15).max(0.0)
+    # print('Cloud frequency (over AOI):', cloud_frequency.getInfo())
     
-    if options and 'cloudFrequencyThresholdDelta' in options and options['cloudFrequencyThresholdDelta']:
-        cloudFrequency = cloudFrequency.add(options['cloudFrequencyThresholdDelta'])
+    # decrease cloudFrequency, include some more partially-cloudy images then clip based on a quality metric
+    # also assume inter-annual variability of the cloud cover
+    cloud_frequency = ee.Number(cloud_frequency).subtract(0.15).max(0.0)
+    
+    if options and options.get('cloudFrequencyThresholdDelta'):
+        cloud_frequency = cloud_frequency.add(options['cloudFrequencyThresholdDelta'])
         
     images = images.filterBounds(g)
 
-    size = images.size()  # not being used?
+    # size = images.size()  # not being used?
     
     images = (addQualityScore(images, g, options)
         .filter(ee.Filter.gt('quality_score', 0))) # sometimes null?!
 
-    # clip collection
-    images = (images.sort('quality_score')
-        .limit(images.size().multiply(ee.Number(1).subtract(cloudFrequency)).toInt()))
+    # clip collection based on quality score and cloud frequency
+    # If quality score to filter clouds is already known for waterbody
+    if options and options.get('quality_score_cloud_threshold'):
+        images = images.filter(ee.Filter.lte(
+            'quality_score',
+            options['quality_score_cloud_threshold']
+        ))
+    # Else calculate based on available images
+    else:
+        images = (images.sort('quality_score')
+            .limit(images.size().multiply(ee.Number(1).subtract(cloud_frequency)).toInt()))
         
     # # remove too dark images
     # images = images.sort('quality_score', false)
