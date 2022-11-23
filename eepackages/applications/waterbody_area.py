@@ -2,7 +2,16 @@ import ee
 from eepackages import assets
 from eepackages import utils
 
-def computeSurfaceWaterArea(waterbody, start_filter, start, stop, scale, waterOccurrence, opt_missions):
+def computeSurfaceWaterArea(
+  waterbody,
+  start_filter,
+  start,
+  stop,
+  scale,
+  waterOccurrence,
+  opt_missions=None,
+  quality_score_attribute="qTh_15"
+):
   geom = ee.Feature(waterbody).geometry()
   
   missions = ['L4', 'L5', 'L7', 'L8', 'S2']
@@ -21,17 +30,19 @@ def computeSurfaceWaterArea(waterbody, start_filter, start, stop, scale, waterOc
   
   options = {
       # 'cloudFrequencyThresholdDelta': -0.15
-     'scale': scale * 5
+     'scale': scale * 5,
+     'cloud_frequency': waterbody.get('cloud_frequency').getInfo(),
+     'quality_score_cloud_threshold': waterbody.get(quality_score_attribute).getInfo()
   }
 
   g = geom.buffer(300, scale)
 
-  # images = assets.getMostlyCleanImages(images, g, options).sort('system:time_start')
-  # images = images.filterDate(start, stop)
+  images = assets.getMostlyCleanImages(images, g, options).sort('system:time_start')
+  images = images.filterDate(start, stop)
 
   # all images, but with quality score
-  images = (assets.addQualityScore(images, g, options)
-    .filter(ee.Filter.gt('quality_score', 0))) # sometimes null?!
+  # images = (assets.addQualityScore(images, g, options)
+  #   .filter(ee.Filter.gt('quality_score', 0))) # sometimes null?!
 
 
   # print('Image count (clean): ', images.size())
