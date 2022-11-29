@@ -10,15 +10,42 @@ def computeSurfaceWaterArea(
   scale,
   waterOccurrence,
   opt_missions=None,
-  quality_score_attribute="qTh_15"
+  quality_score_attributes=None
 ):
+  """
+  compute the surface area of given waterbody between start and stop, using images between
+  start_filter and stop to obtain a representative set of images to filter cloudy images.
+
+  args:
+    waterbody: waterbody feature
+    start_filter: start date of images using to filter cloudy images
+    start: start date of analysis
+    stop: stop date of analysis
+    scale: scale of analysis
+    waterOccurrence: feature collection of reference water occurrence data.
+    opt_missions: mission codes to use for the input imagery. Leave empty for a recommended set of
+      missions.
+    quality_score_attribute: if the quality_score is precomputed, a ranked list of attributes of
+      the waterbody to use as quality_score. Otherwise None.
+  returns:
+    image collection containing water layers.
+  """
+
   geom = ee.Feature(waterbody).geometry()
   
   missions = ['L4', 'L5', 'L7', 'L8', 'S2']
+  props = waterbody.getInfo()["properties"]
+  quality_score_threshold = None
+  if quality_score_attributes:
+    for prop in quality_score_attributes:
+        att = props.get(prop)
+        if att:
+            quality_score_threshold = att
+            break
 
   if opt_missions:
     missions = opt_missions
-  
+    
   images = assets.getImages(geom, {
     'resample': True,
     'filter': ee.Filter.date(start_filter, stop),
@@ -26,13 +53,11 @@ def computeSurfaceWaterArea(
     'scale': scale * 10
   })
   
-  # print('Image count: ', images.size())
-  
   options = {
       # 'cloudFrequencyThresholdDelta': -0.15
      'scale': scale * 5,
-     'cloud_frequency': waterbody.get('cloud_frequency').getInfo(),
-     'quality_score_cloud_threshold': waterbody.get(quality_score_attribute).getInfo()
+     'cloud_frequency': props.get('cloud_frequency'),
+     'quality_score_cloud_threshold': quality_score_threshold,
   }
 
   g = geom.buffer(300, scale)
