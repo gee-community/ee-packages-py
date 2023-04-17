@@ -50,7 +50,7 @@ def getImages(g, options):
     if options and "cloudMaskAlgorithms" in options:
         cloudMaskAlgorithms_ = options["cloudMaskAlgorithms"]
 
-    missions = ["S2", "L8"]
+    missions = ["S2", "L8", "L9"]
 
     if options and "missions" in options:
         missions = options["missions"]
@@ -66,6 +66,10 @@ def getImages(g, options):
         "L8": {
             "from": ["B6", "B5", "B4", "B3", "B2"],
             "to": ["swir", "nir", "red", "green", "blue"],
+        },
+        "L9": {
+            "from": ["B6", "B5", "B4", "B3", "B2", "B6", "B7"],
+            "to": ["swir", "nir", "red", "green", "blue", "swir1", "swir2"],
         },
         "L5": {
             "from": ["B5", "B4", "B3", "B2", "B1"],
@@ -84,6 +88,8 @@ def getImages(g, options):
     if options and "includeTemperature" in options:
         bands["L8"]["from"].append("B10")
         bands["L8"]["to"].append("temp")
+        bands["L9"]["from"].append("B10")
+        bands["L9"]["to"].append("temp")
         bands["L5"]["from"].append("B6")
         bands["L5"]["to"].append("temp")
         bands["L4"]["from"].append("B6")
@@ -134,6 +140,20 @@ def getImages(g, options):
         bands["S2"]["to"].append("cloud")
 
     s2 = s2.select(bands["S2"]["from"], bands["S2"]["to"])
+
+    l9 = ee.ImageCollection("LANDSAT/LC09/C02/T1_TOA")
+
+    l9 = l9.filterBounds(g)
+
+    if options and "filter" in options:
+        l9 = l9.filter(options["filter"])
+
+    if cloudMask:
+        l9 = l9.map(cloudMaskAlgorithms_["L9"])
+        bands["L9"]["from"].append("cloud")
+        bands["L9"]["to"].append("cloud")
+
+    l9 = l9.select(bands["L9"]["from"], bands["L9"]["to"])
 
     l8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_RT_TOA")
 
@@ -324,6 +344,21 @@ def getImages(g, options):
         l8 = l8.map(f)
         images = images.merge(l8)
 
+    if "L9" in missions:
+
+        def f(i):
+            return i.set(
+                {
+                    "MISSION": "L9",
+                    "BANDS_FROM": bands["L9"]["from"],
+                    "BANDS_TO": bands["L9"]["to"],
+                    "MULTIPLIER": 1,
+                }
+            )
+
+        l9 = l9.map(f)
+        images = images.merge(l9)
+
     images = ee.ImageCollection(images)
 
     if resample:
@@ -387,7 +422,7 @@ def getImages(g, options):
 
 
 # /***
-#  * Sentinel-2 produces multiple images, resultsing sometimes 4x more images than the actual size.
+#  * Sentinel-2 produces multiple images, resulting sometimes 4x more images than the actual size.
 #  * This is bad for any statistical analysis.
 #  *
 #  * This function mosaics images by time.
@@ -415,46 +450,6 @@ def mosaicByTime(images):
     results = results.map(merge_matches)
 
     return ee.ImageCollection(results)
-
-
-def mosaic_by_day(images):
-    """
-    Mosaic the image collection based on the day of the image.
-
-    Args:
-        images: input ImageCollection
-
-    Returns:
-        ImageCollection with merged images by date.
-    """
-
-    def merge_daily_images(i):
-        matches = ee.ImageCollection.fromImages(images.get("images"))
-        return (
-            matches.sort("system:time_start")
-            .mosaic()
-            .set("system:time_start", ee.Date(i.get("date")).millis())
-            .set("system:footprint", matches.geometry().dissolve(10))
-        )
-
-    images = images.map(lambda i: i.set("date", i.date().format("yyyy-MM-dd")))
-    return (
-        ee.ImageCollection(
-            ee.Join.saveAll("images").apply(
-                primary=images,
-                secondary=images,
-                condition=ee.Filter.And(
-                    ee.Filter.equals("date", "date"),
-                    ee.Filter.equals("SPACECRAFT_NAME", "SPACECRAFT_NAME"),
-                    ee.Filter.equals(
-                        "SENSING_ORBIT_NUMBER", "SENSING_ORBIT_NUMBER"
-                    ),  # unique for S2
-                ),
-            )
-        )
-        .map(merge_daily_images)
-        .distinct("system:time_start")  # A self join returns duplicates, need to merge
-    )
 
 
 def addQualityScore(images, g, options):
