@@ -217,3 +217,49 @@ def computeSurfaceWaterAreaJRC(waterbody, start, stop, scale):
     water = jrcMonthly.filterDate(start, stop).map(compute_area)
 
     return water
+
+
+def extrapolate_JRC_wo(waterbody, scale, max_trusted_occurrence=0.97):
+    """
+    extrapolate the JRC dataset based on a maximum value that is trusted.
+    This is needed when a waterbody experiences an unprecedented drought, in which gap filling
+    fails when using the JRC dataset as-is.
+    """
+    water_occurrence = (
+        ee.Image("JRC/GSW1_4/GlobalSurfaceWater")
+        .select("occurrence")
+        .mask(1)  # Mask important to fix JRC inconsistent masking.
+        .resample("bicubic")
+        .divide(100)
+    )
+
+    # we don't trust water occurrence dataset when water level is below this (values > th)
+    min_water = water_occurrence.gt(max_trusted_occurrence)
+
+    # Calculate distance from water Occurence max
+    dist = (
+        min_water.Not()
+        .fastDistanceTransform(150)
+        .reproject(ee.Projection("EPSG:4326").atScale(100))
+        .resample("bicubic")
+        .sqrt()
+        .multiply(100)
+    )
+
+    # calculate max distance for scaling to 1
+    max_distance = dist.reduceRegion(
+        reducer=ee.Reducer.max(),
+        geometry=waterbody.geometry(),
+        scale=scale,
+        bestEffort=True,
+    ).get("distance")
+
+    # scale distance values from min_trusted_occurrence to 1
+    extrap_scale = ee.Number(1).subtract(max_trusted_occurrence).divide(max_distance)
+    water_occurrence_extrapolated = dist.multiply(extrap_scale).add(
+        max_trusted_occurrence
+    )
+
+    return water_occurrence.where(
+        water_occurrence.gt(max_trusted_occurrence), water_occurrence_extrapolated
+    )
