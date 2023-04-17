@@ -452,6 +452,44 @@ def mosaicByTime(images):
     return ee.ImageCollection(results)
 
 
+def mosaic_by_day(images):
+    """
+    Mosaic the image collection based on the day of the image.
+    Args:
+        images: input ImageCollection
+    Returns:
+        ImageCollection with merged images by date.
+    """
+
+    def merge_daily_images(i):
+        matches = ee.ImageCollection.fromImages(images.get("images"))
+        return (
+            matches.sort("system:time_start")
+            .mosaic()
+            .set("system:time_start", ee.Date(i.get("date")).millis())
+            .set("system:footprint", matches.geometry().dissolve(10))
+        )
+
+    images = images.map(lambda i: i.set("date", i.date().format("yyyy-MM-dd")))
+    return (
+        ee.ImageCollection(
+            ee.Join.saveAll("images").apply(
+                primary=images,
+                secondary=images,
+                condition=ee.Filter.And(
+                    ee.Filter.equals("date", "date"),
+                    ee.Filter.equals("SPACECRAFT_NAME", "SPACECRAFT_NAME"),
+                    ee.Filter.equals(
+                        "SENSING_ORBIT_NUMBER", "SENSING_ORBIT_NUMBER"
+                    ),  # unique for S2
+                ),
+            )
+        )
+        .map(merge_daily_images)
+        .distinct("system:time_start")  # A self join returns duplicates, need to merge
+    )
+
+
 def addQualityScore(images, g, options):
     scorePercentile = 75
     scale = 500
