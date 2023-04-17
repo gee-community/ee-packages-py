@@ -8,6 +8,7 @@ from pathos import logger
 from pathos.core import getpid
 from retry import retry
 
+
 @retry(tries=10, delay=5, backoff=10)
 def download_image(
     i_ee,
@@ -16,7 +17,7 @@ def download_image(
     serialized_image_list: Dict[str, Any],
     name_prefix: str,
     out_dir: Optional[Path],
-    download_kwargs: Optional[Dict[str, Any]]
+    download_kwargs: Optional[Dict[str, Any]],
 ) -> None:
     """
     Hidden function to be used with download_image_collection. As we want compatibility with
@@ -34,7 +35,7 @@ def download_image(
     log_file: Path = out_dir / "logging" / f"{pid}.log"
     fh = logging.FileHandler(log_file)
     fh.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s %(message)s')
+    formatter = logging.Formatter("%(asctime)s %(name)-12s %(levelname)-8s %(message)s")
     fh.setFormatter(formatter)
 
     plogger = logger(level=logging.DEBUG, handler=fh)
@@ -43,7 +44,7 @@ def download_image(
     ee_hv_url: str = "https://earthengine-highvolume.googleapis.com"
     if ee_api_url is not ee_hv_url:
         i_ee.Initialize(opt_url=ee_hv_url)
-    
+
     image_list: i_ee.List = i_ee.deserializer.fromJSON(serialized_image_list)
 
     img: i_ee.Image = i_ee.Image(image_list.get(index))
@@ -68,11 +69,10 @@ def download_image(
     elif image_download_method == i_ee.Image.getThumbURL:
         extention: str = ".png"
     else:
-        raise RuntimeError(
-            f"image download method {image_download_method} unknown.")
+        raise RuntimeError(f"image download method {image_download_method} unknown.")
 
     # Image naming chain
-    img_props: Dict[str, Any] = img.getInfo()['properties']
+    img_props: Dict[str, Any] = img.getInfo()["properties"]
     t0: Optional[int] = img_props.get("system:time_start")
     img_index: Optional[int] = img_props.get("system:index")
     if t0:
@@ -85,8 +85,8 @@ def download_image(
     # File name
     filename: Path = out_dir / f"{name_prefix}{file_id}{extention}"
 
-    with open(filename, 'wb') as out_file:
+    with open(filename, "wb") as out_file:
         shutil.copyfileobj(r.raw, out_file)
-    
+
     plogger.info(f"Done: {index}")
     plogger.removeHandler(fh)

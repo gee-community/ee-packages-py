@@ -89,7 +89,7 @@ def computeSurfaceWaterArea(
 def computeSurfaceWaterArea_SingleImage(i, waterbody, scale, waterOccurrence):
     geom = ee.Feature(waterbody).geometry()
 
-    fillPercentile = 50  # we don't trust our prior
+    fillPercentile = 50  # // we don't trust our prior
 
     ndwiBands = ["green", "swir"]
     # var ndwiBands = ['green', 'nir']

@@ -33,8 +33,8 @@ from eepackages.multiprocessing.download_image import download_image
 def otsu(histogram):
     histogram = ee.Dictionary(histogram)
 
-    counts = ee.Array(histogram.get('histogram'))
-    means = ee.Array(histogram.get('bucketMeans'))
+    counts = ee.Array(histogram.get("histogram"))
+    means = ee.Array(histogram.get("bucketMeans"))
     size = means.length().get([0])
     total = counts.reduce(ee.Reducer.sum(), [0]).get([0])
     sum = means.multiply(counts).reduce(ee.Reducer.sum(), [0]).get([0])
@@ -47,35 +47,56 @@ def otsu(histogram):
         aCounts = counts.slice(0, 0, i)
         aCount = aCounts.reduce(ee.Reducer.sum(), [0]).get([0])
         aMeans = means.slice(0, 0, i)
-        aMean = aMeans.multiply(aCounts).reduce(
-            ee.Reducer.sum(), [0]).get([0]).divide(aCount)
+        aMean = (
+            aMeans.multiply(aCounts)
+            .reduce(ee.Reducer.sum(), [0])
+            .get([0])
+            .divide(aCount)
+        )
         bCount = total.subtract(aCount)
         bMean = sum.subtract(aCount.multiply(aMean)).divide(bCount)
 
-        return aCount.multiply(aMean.subtract(mean).pow(2)).add(bCount.multiply(bMean.subtract(mean).pow(2)))
+        return aCount.multiply(aMean.subtract(mean).pow(2)).add(
+            bCount.multiply(bMean.subtract(mean).pow(2))
+        )
 
     bss = indices.map(f)
 
     #  Return the mean value corresponding to the maximum BSS.
     return means.sort(bss).get([-1])
 
+
 # /***
 #  * Compute a threshold using Otsu method (bimodal)
 #  */
 
 
-def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, minValue, debug=False, minEdgeLength=None, minEdgeGradient=None, minEdgeValue=None):
+def computeThresholdUsingOtsu(
+    image,
+    scale,
+    bounds,
+    cannyThreshold,
+    cannySigma,
+    minValue,
+    debug=False,
+    minEdgeLength=None,
+    minEdgeGradient=None,
+    minEdgeValue=None,
+):
     #  clip image edges
-    mask = image.mask().gt(0).clip(bounds).focal_min(
-        ee.Number(scale).multiply(3), 'circle', 'meters')
+    mask = (
+        image.mask()
+        .gt(0)
+        .clip(bounds)
+        .focal_min(ee.Number(scale).multiply(3), "circle", "meters")
+    )
 
     #  detect sharp changes
     edge = ee.Algorithms.CannyEdgeDetector(image, cannyThreshold, cannySigma)
     edge = edge.multiply(mask)
 
     if minEdgeLength:
-        connected = edge.mask(edge).lt(
-            cannyThreshold).connectedPixelCount(200, True)
+        connected = edge.mask(edge).lt(cannyThreshold).connectedPixelCount(200, True)
 
         edgeLong = connected.gte(minEdgeLength)
 
@@ -86,11 +107,12 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
         edge = edgeLong
 
     #  buffer around NDWI edges
-    edgeBuffer = edge.focal_max(ee.Number(scale), 'square', 'meters')
+    edgeBuffer = edge.focal_max(ee.Number(scale), "square", "meters")
 
     if minEdgeValue:
         edgeMin = image.reduceNeighborhood(
-            ee.Reducer.min(), ee.Kernel.circle(ee.Number(scale), 'meters'))
+            ee.Reducer.min(), ee.Kernel.circle(ee.Number(scale), "meters")
+        )
 
         edgeBuffer = edgeBuffer.updateMask(edgeMin.gt(minEdgeValue))
 
@@ -98,11 +120,20 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
         #  Map.addLayer(edge.updateMask(edgeBuffer), {palette:['ff0000']}, 'edge min', false);
 
     if minEdgeGradient:
-        edgeGradient = image.gradient().abs().reduce(
-            ee.Reducer.max()).updateMask(edgeBuffer.mask())
+        edgeGradient = (
+            image.gradient()
+            .abs()
+            .reduce(ee.Reducer.max())
+            .updateMask(edgeBuffer.mask())
+        )
 
-        edgeGradientTh = ee.Number(edgeGradient.reduceRegion(
-            ee.Reducer.percentile([minEdgeGradient]), bounds, scale).values().get(0))
+        edgeGradientTh = ee.Number(
+            edgeGradient.reduceRegion(
+                ee.Reducer.percentile([minEdgeGradient]), bounds, scale
+            )
+            .values()
+            .get(0)
+        )
 
         # if debug:
         #  print('Edge gradient threshold: ', edgeGradientTh)
@@ -114,8 +145,7 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
         edgeBuffer = edgeBuffer.updateMask(edgeGradient.gt(edgeGradientTh))
 
     edge = edge.updateMask(edgeBuffer)
-    edgeBuffer = edge.focal_max(
-        ee.Number(scale).multiply(1), 'square', 'meters')
+    edgeBuffer = edge.focal_max(ee.Number(scale).multiply(1), "square", "meters")
     imageEdge = image.mask(edgeBuffer)
 
     # if debug:
@@ -123,11 +153,15 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
 
     #  compute threshold using Otsu thresholding
     buckets = 100
-    hist = ee.Dictionary(ee.Dictionary(imageEdge.reduceRegion(
-        ee.Reducer.histogram(buckets), bounds, scale)).values().get(0))
+    hist = ee.Dictionary(
+        ee.Dictionary(
+            imageEdge.reduceRegion(ee.Reducer.histogram(buckets), bounds, scale)
+        )
+        .values()
+        .get(0)
+    )
 
-    threshold = ee.Algorithms.If(hist.contains(
-        'bucketMeans'), otsu(hist), minValue)
+    threshold = ee.Algorithms.If(hist.contains("bucketMeans"), otsu(hist), minValue)
     threshold = ee.Number(threshold)
 
     if debug:
@@ -140,7 +174,7 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
 
         # Map.addLayer(edge.mask(edge), {palette:['ff0000']}, 'edges', true);
 
-        print('Threshold: ', threshold)
+        print("Threshold: ", threshold)
 
         # print('Image values:', ui.Chart.image.histogram(image, bounds, scale, buckets));
         # print('Image values (edge): ', ui.Chart.image.histogram(imageEdge, bounds, scale, buckets));
@@ -153,8 +187,9 @@ def computeThresholdUsingOtsu(image, scale, bounds, cannyThreshold, cannySigma, 
 
 
 def focalMin(image: ee.Image, radius: float):
-    erosion: ee.Image = image.Not().fastDistanceTransform(
-        radius).sqrt().lte(radius).Not()
+    erosion: ee.Image = (
+        image.Not().fastDistanceTransform(radius).sqrt().lte(radius).Not()
+    )
     return erosion
 
 
@@ -176,7 +211,7 @@ def _batch_download_ic(
     name_prefix: str,
     out_dir: Optional[Path],
     pool_size: int,
-    download_kwargs: Optional[Dict[str, Any]]
+    download_kwargs: Optional[Dict[str, Any]],
 ):
     """
     does the actual work batch downloading images in an ee.ImageCollection using the python
@@ -194,14 +229,15 @@ def _batch_download_ic(
     serialized_il: str = image_list.serialize()
 
     pool: ProcessPool = ProcessPool(nodes=pool_size)
-    result = pool.amap(download_image,
+    result = pool.amap(
+        download_image,
         repeat(ee),
         range(num_images),
         repeat(img_download_method),
         repeat(serialized_il),
         repeat(name_prefix),
         repeat(out_dir),
-        repeat(download_kwargs)
+        repeat(download_kwargs),
     )
 
     start_time: time = time()
@@ -216,16 +252,17 @@ def _batch_download_ic(
     pool.join()
     pool.clear()
 
+
 def download_image_collection(
     ic: ee.ImageCollection,
     name_prefix: str = "ic_",
     out_dir: Optional[Path] = None,
     pool_size: int = 25,
-    download_kwargs: Optional[Dict[str, Any]] = None
+    download_kwargs: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Download images in image collection. Only works for images in the collection that are < 32M
-    and grid dimension < 10000, documented at 
+    and grid dimension < 10000, documented at
     https://developers.google.com/earth-engine/apidocs/ee-image-getdownloadurl.
 
     args:
@@ -236,8 +273,9 @@ def download_image_collection(
         download_kwargs (Optional(Dict(str, Any))): keyword arguments used in
             [getDownloadUrl](https://developers.google.com/earth-engine/apidocs/ee-image-getdownloadurl).
     """
-    _batch_download_ic(ic, ee.Image.getDownloadURL,
-                       name_prefix, out_dir, pool_size, download_kwargs)
+    _batch_download_ic(
+        ic, ee.Image.getDownloadURL, name_prefix, out_dir, pool_size, download_kwargs
+    )
 
 
 def download_image_collection_thumb(
@@ -245,7 +283,7 @@ def download_image_collection_thumb(
     name_prefix: str = "ic_",
     out_dir: Optional[Path] = None,
     pool_size: int = 25,
-    download_kwargs: Optional[Dict[str, Any]] = None
+    download_kwargs: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Download thumb images in and image collection. Only works for images in the collection that are < 32M
@@ -260,8 +298,9 @@ def download_image_collection_thumb(
         download_kwargs (Optional(Dict(str, Any))): keyword arguments used in
             [getDownloadUrl](https://developers.google.com/earth-engine/apidocs/ee-image-getthumburl).
     """
-    _batch_download_ic(ic, ee.Image.getThumbURL, name_prefix,
-                       out_dir, pool_size, download_kwargs)
+    _batch_download_ic(
+        ic, ee.Image.getThumbURL, name_prefix, out_dir, pool_size, download_kwargs
+    )
 
 
 def radians(img):
@@ -274,13 +313,28 @@ def hillshade(az, ze, slope, aspect):
     azimuth = radians(ee.Image.constant(az))
     zenith = radians(ee.Image.constant(90).subtract(ee.Image.constant(ze)))
 
-    return azimuth \
-        .subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin()) \
+    return (
+        azimuth.subtract(aspect)
+        .cos()
+        .multiply(slope.sin())
+        .multiply(zenith.sin())
         .add(zenith.cos().multiply(slope.cos()))
+    )
 
 
-def hillshadeRGB(image, elevation, weight=1, height_multiplier=5, azimuth=0, zenith=45,
-                 contrast=0, brightness=0, saturation=1, castShadows=False, customTerrain=False):
+def hillshadeRGB(
+    image,
+    elevation,
+    weight=1,
+    height_multiplier=5,
+    azimuth=0,
+    zenith=45,
+    contrast=0,
+    brightness=0,
+    saturation=1,
+    castShadows=False,
+    customTerrain=False,
+):
     """Styles RGB image using hillshading, mixes RGB and hillshade using HSV<->RGB transform"""
 
     hsv = image.visualize().unitScale(0, 255).rgbToHsv()
@@ -288,21 +342,25 @@ def hillshadeRGB(image, elevation, weight=1, height_multiplier=5, azimuth=0, zen
     z = elevation.multiply(ee.Image.constant(height_multiplier))
 
     terrain = ee.Algorithms.Terrain(z)
-    slope = radians(terrain.select(['slope'])).resample('bicubic')
-    aspect = radians(terrain.select(['aspect'])).resample('bicubic')
+    slope = radians(terrain.select(["slope"])).resample("bicubic")
+    aspect = radians(terrain.select(["aspect"])).resample("bicubic")
 
     if customTerrain:
-        raise NotImplementedError(
-            'customTerrain argument is not implemented yet')
+        raise NotImplementedError("customTerrain argument is not implemented yet")
 
-    hs = hillshade(azimuth, zenith, slope, aspect).resample('bicubic')
+    hs = hillshade(azimuth, zenith, slope, aspect).resample("bicubic")
 
     if castShadows:
         hysteresis = True
         neighborhoodSize = 256
 
-        hillShadow = ee.Algorithms.HillShadow(elevation, azimuth,
-                                              ee.Number(90).subtract(zenith), neighborhoodSize, hysteresis).float()
+        hillShadow = ee.Algorithms.HillShadow(
+            elevation,
+            azimuth,
+            ee.Number(90).subtract(zenith),
+            neighborhoodSize,
+            hysteresis,
+        ).float()
 
         hillShadow = ee.Image(1).float().subtract(hillShadow)
 
@@ -318,18 +376,22 @@ def hillshadeRGB(image, elevation, weight=1, height_multiplier=5, azimuth=0, zen
         # transparent
         hillShadow = hillShadow.multiply(0.7)
 
-        hs = hs.subtract(hillShadow).rename('shadow')
+        hs = hs.subtract(hillShadow).rename("shadow")
 
-    intensity = hs.multiply(ee.Image.constant(weight)) \
-        .add(hsv.select('value').multiply(ee.Image.constant(1)
-                                          .subtract(weight)))
+    intensity = hs.multiply(ee.Image.constant(weight)).add(
+        hsv.select("value").multiply(ee.Image.constant(1).subtract(weight))
+    )
 
-    sat = hsv.select('saturation').multiply(saturation)
+    sat = hsv.select("saturation").multiply(saturation)
 
-    hue = hsv.select('hue')
+    hue = hsv.select("hue")
 
-    result = ee.Image.cat(hue, sat, intensity).hsvToRgb() \
-        .multiply(ee.Image.constant(1).float().add(contrast)).add(ee.Image.constant(brightness).float())
+    result = (
+        ee.Image.cat(hue, sat, intensity)
+        .hsvToRgb()
+        .multiply(ee.Image.constant(1).float().add(contrast))
+        .add(ee.Image.constant(brightness).float())
+    )
 
     if customTerrain:
         mask = elevation.mask().focal_min(2)
@@ -345,14 +407,13 @@ def getIsolines(image, levels=None):
     def addIso(image, level):
         crossing = image.subtract(level).focal_median(3).zeroCrossing()
         exact = image.eq(level)
-        return ee.Image(level).float().mask(crossing.Or(exact)).set({'level': level})
+        return ee.Image(level).float().mask(crossing.Or(exact)).set({"level": level})
 
     if not levels:
         levels = ee.List.sequence(0, 1, 0.1)
 
     levels = ee.List(levels)
 
-    isoImages = ee.ImageCollection(levels.map(
-        lambda l: addIso(image, ee.Number(l))))
+    isoImages = ee.ImageCollection(levels.map(lambda l: addIso(image, ee.Number(l))))
 
     return isoImages
