@@ -278,6 +278,7 @@ def getImages(g, options):
             .set({"MISSION": "S2"})
             .set({"SUN_AZIMUTH": i.get("MEAN_SOLAR_AZIMUTH_ANGLE")})
             .set({"MULTIPLIER": 0.0001})
+            .set({"SPACECRAFT_ID": i.get("SPACECRAFT_NAME")})
         )
 
     s2 = s2.map(f2)
@@ -461,26 +462,45 @@ def mosaic_by_day(images):
         ImageCollection with merged images by date.
     """
 
+    images = ee.ImageCollection(images)
+
     def merge_daily_images(i):
-        matches = ee.ImageCollection.fromImages(images.get("images"))
-        return (
-            matches.sort("system:time_start")
-            .mosaic()
-            .set("system:time_start", ee.Date(i.get("date")).millis())
-            .set("system:footprint", matches.geometry().dissolve(10))
+        matches = ee.ImageCollection.fromImages(i.get("images"))
+        matches_with_props = ee.ImageCollection(
+            matches.sort("system:index").copyProperties(
+                i, exclude=["system:time_start"]
+            )
+        )
+        return matches_with_props.mosaic().set(
+            {
+                "system:time_start": ee.Date(i.get("date")).millis(),
+                "system:footprint": matches.geometry().dissolve(10),
+            }
         )
 
-    images = images.map(lambda i: i.set("date", i.date().format("yyyy-MM-dd")))
+    def set_image_properties(i):
+        d = i.toDictionary()
+        return i.set(
+            {
+                "date": i.date().format("yyyy-MM-dd"),
+                "SENSING_ORBIT_NUMBER": ee.Number(d.get("SENSING_ORBIT_NUMBER", -1)),
+            }
+        )
+
+    images = images.map(set_image_properties)
     return (
         ee.ImageCollection(
             ee.Join.saveAll("images").apply(
                 primary=images,
                 secondary=images,
                 condition=ee.Filter.And(
-                    ee.Filter.equals("date", "date"),
-                    ee.Filter.equals("SPACECRAFT_NAME", "SPACECRAFT_NAME"),
+                    ee.Filter.equals(leftField="date", rightField="date"),
                     ee.Filter.equals(
-                        "SENSING_ORBIT_NUMBER", "SENSING_ORBIT_NUMBER"
+                        leftField="SPACECRAFT_ID", rightField="SPACECRAFT_ID"
+                    ),
+                    ee.Filter.equals(
+                        leftField="SENSING_ORBIT_NUMBER",
+                        rightField="SENSING_ORBIT_NUMBER",
                     ),  # unique for S2
                 ),
             )
