@@ -12,22 +12,27 @@ def computeSurfaceWaterArea(
     waterOccurrence,
     opt_missions=None,
     quality_score_attributes=None,
+    mosaic_by_day=True,
+    min_overlap_fraction=None,
 ):
     """
     compute the surface area of given waterbody between start and stop, using images between
     start_filter and stop to obtain a representative set of images to filter cloudy images.
 
     args:
-      waterbody: waterbody feature
-      start_filter: start date of images using to filter cloudy images
-      start: start date of analysis
-      stop: stop date of analysis
-      scale: scale of analysis
-      waterOccurrence: feature collection of reference water occurrence data.
-      opt_missions: mission codes to use for the input imagery. Leave empty for a recommended set of
-        missions.
-      quality_score_attribute: if the quality_score is precomputed, a ranked list of attributes of
-        the waterbody to use as quality_score. Otherwise None.
+        waterbody: waterbody feature
+        start_filter: start date of images using to filter cloudy images
+        start: start date of analysis
+        stop: stop date of analysis
+        scale: scale of analysis
+        waterOccurrence: feature collection of reference water occurrence data.
+            opt_missions: mission codes to use for the input imagery. Leave empty for a recommended
+            set of missions.
+        quality_score_attribute: if the quality_score is precomputed, a ranked list of attributes of
+            the waterbody to use as quality_score. Otherwise None.
+        min_overlap_fraction (Optional[float]): minimum overlap fraction between image footprint
+            and waterbody. Leave as None to skip filtering.
+
     returns:
       image collection containing water layers.
     """
@@ -57,9 +62,6 @@ def computeSurfaceWaterArea(
         },
     )
 
-    # TODO: mosaic by day
-    # images = assets.mosaic_by_day(images)
-
     options = {
         # 'cloudFrequencyThresholdDelta': -0.15
         "scale": scale * 5,
@@ -72,11 +74,11 @@ def computeSurfaceWaterArea(
     images = assets.getMostlyCleanImages(images, g, options).sort("system:time_start")
     images = images.filterDate(start, stop)
 
-    # all images, but with quality score
-    # images = (assets.addQualityScore(images, g, options)
-    #   .filter(ee.Filter.gt('quality_score', 0))) # sometimes null?!
+    if mosaic_by_day:
+        images = assets.mosaic_by_day(images)
 
-    # print('Image count (clean): ', images.size())
+    if min_overlap_fraction:
+        images = filter_waterbody_overlap(images, waterbody, min_overlap_fraction)
 
     water = images.map(
         lambda i: computeSurfaceWaterArea_SingleImage(
@@ -222,6 +224,36 @@ def computeSurfaceWaterAreaJRC(waterbody, start, stop, scale):
     return water
 
 
+def filter_waterbody_overlap(images, waterbody, min_overlap_fraction=0.4):
+    """
+    filter images based on the overlap of the image footprint with the waterbody.
+    If the overlap consists of less than `min_overlap_fraction` of the waterbody area, the image
+    if filtered out.
+
+    Args:
+        images: ImageCollection of input images
+        waterbody: Feature with waterbody
+        min_overlap_fraction: minumum fraction of overlap to accept.
+    returns:
+        filtered ImageCollection
+    """
+
+    def set_intersection(i):
+        intersection_area = (
+            ee.Geometry(i.get("system:footprint"))
+            .intersection(waterbody.geometry())
+            .area()
+        )
+        waterbody_area = waterbody.geometry().area()
+        i = i.set("overlap_fraction", intersection_area.divide(waterbody_area))
+        return i
+
+    images = images.map(set_intersection)
+    images = images.filter(ee.Filter.gte("overlap_fraction", min_overlap_fraction))
+
+    return images
+
+
 def extrapolate_JRC_wo(waterbody, scale, max_trusted_occurrence=0.97):
     """
     extrapolate the JRC dataset based on a maximum value that is trusted.
@@ -231,7 +263,7 @@ def extrapolate_JRC_wo(waterbody, scale, max_trusted_occurrence=0.97):
     water_occurrence = (
         ee.Image("JRC/GSW1_4/GlobalSurfaceWater")
         .select("occurrence")
-        .mask(1)  # Mask important to fix JRC inconsistent masking.
+        .mask(1)  # fixes JRC masking lacking
         .resample("bicubic")
         .divide(100)
     )
