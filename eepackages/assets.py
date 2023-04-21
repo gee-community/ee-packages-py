@@ -466,16 +466,16 @@ def mosaic_by_day(images):
 
     def merge_daily_images(i):
         matches = ee.ImageCollection.fromImages(i.get("images"))
-        matches_with_props = ee.ImageCollection(
-            matches.sort("system:index").copyProperties(
-                i, exclude=["system:time_start"]
+        return (
+            matches.sort("system:index")
+            .mosaic()
+            .copyProperties(i, exclude=["system:time_start"])
+            .set(
+                {
+                    "system:time_start": ee.Date(i.get("date")).millis(),
+                    "system:footprint": matches.geometry().dissolve(10),
+                }
             )
-        )
-        return matches_with_props.mosaic().set(
-            {
-                "system:time_start": ee.Date(i.get("date")).millis(),
-                "system:footprint": matches.geometry().dissolve(10),
-            }
         )
 
     def set_image_properties(i):
@@ -488,10 +488,11 @@ def mosaic_by_day(images):
         )
 
     images = images.map(set_image_properties)
-    return (
+    distinct = images.distinct(["date"])
+    return ee.ImageCollection(
         ee.ImageCollection(
             ee.Join.saveAll("images").apply(
-                primary=images,
+                primary=distinct,
                 secondary=images,
                 condition=ee.Filter.And(
                     ee.Filter.equals(leftField="date", rightField="date"),
@@ -504,9 +505,8 @@ def mosaic_by_day(images):
                     ),  # unique for S2
                 ),
             )
-        )
-        .map(merge_daily_images)
-        .distinct("system:time_start")  # A self join returns duplicates, need to merge
+        ).map(merge_daily_images)
+        # .distinct("system:time_start")  # A self join returns duplicates, need to merge
     )
 
 
@@ -527,7 +527,9 @@ def addQualityScore(images, g, options):
             qualityBand = options["qualityBand"]
 
     def add_quality_score(i):
-        score = i.select(qualityBand)  # //.where(i.select('green').gt(0.5), 0.5)
+        score = ee.Image(i).select(
+            qualityBand
+        )  # //.where(i.select('green').gt(0.5), 0.5)
 
         if mask:
             score = score.updateMask(mask)
