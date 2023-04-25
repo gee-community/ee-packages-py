@@ -506,7 +506,6 @@ def mosaic_by_day(images):
                 ),
             )
         ).map(merge_daily_images)
-        # .distinct("system:time_start")  # A self join returns duplicates, need to merge
     )
 
 
