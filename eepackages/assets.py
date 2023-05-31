@@ -2,8 +2,6 @@ import ee
 
 from eepackages import utils
 
-# migrated from JavaScript users/gena/packages/assets.js
-
 
 def cloudMaskAlgorithms_Landsat(image):
     imageWithCloud = ee.Algorithms.Landsat.simpleCloudScore(ee.Image(image))
@@ -280,6 +278,7 @@ def getImages(g, options):
             .set({"MISSION": "S2"})
             .set({"SUN_AZIMUTH": i.get("MEAN_SOLAR_AZIMUTH_ANGLE")})
             .set({"MULTIPLIER": 0.0001})
+            .set({"SPACECRAFT_ID": i.get("SPACECRAFT_NAME")})
         )
 
     s2 = s2.map(f2)
@@ -454,6 +453,62 @@ def mosaicByTime(images):
     return ee.ImageCollection(results)
 
 
+def mosaic_by_day(images):
+    """
+    Mosaic the image collection based on the day of the image.
+    Args:
+        images: input ImageCollection
+    Returns:
+        ImageCollection with merged images by date.
+    """
+
+    images = ee.ImageCollection(images)
+
+    def merge_daily_images(i):
+        matches = ee.ImageCollection.fromImages(i.get("images"))
+        return (
+            matches.sort("system:index")
+            .mosaic()
+            .copyProperties(i, exclude=["system:time_start"])
+            .set(
+                {
+                    "system:time_start": ee.Date(i.get("date")).millis(),
+                    "system:footprint": matches.geometry().dissolve(10),
+                }
+            )
+        )
+
+    def set_image_properties(i):
+        d = i.toDictionary()
+        return i.set(
+            {
+                "date": i.date().format("yyyy-MM-dd"),
+                "SENSING_ORBIT_NUMBER": ee.Number(d.get("SENSING_ORBIT_NUMBER", -1)),
+            }
+        )
+
+    images = images.map(set_image_properties)
+    distinct = images.distinct(["date"])
+    return ee.ImageCollection(
+        ee.ImageCollection(
+            ee.Join.saveAll("images").apply(
+                primary=distinct,
+                secondary=images,
+                condition=ee.Filter.And(
+                    ee.Filter.equals(leftField="date", rightField="date"),
+                    ee.Filter.equals(
+                        leftField="SPACECRAFT_ID", rightField="SPACECRAFT_ID"
+                    ),
+                    ee.Filter.equals(
+                        leftField="SENSING_ORBIT_NUMBER",
+                        rightField="SENSING_ORBIT_NUMBER",
+                    ),  # unique for S2
+                ),
+            )
+        ).map(merge_daily_images)
+    )
+
+
 def addQualityScore(images, g, options):
     scorePercentile = 75
     scale = 500
@@ -471,7 +526,9 @@ def addQualityScore(images, g, options):
             qualityBand = options["qualityBand"]
 
     def add_quality_score(i):
-        score = i.select(qualityBand)  # //.where(i.select('green').gt(0.5), 0.5)
+        score = ee.Image(i).select(
+            qualityBand
+        )  # //.where(i.select('green').gt(0.5), 0.5)
 
         if mask:
             score = score.updateMask(mask)

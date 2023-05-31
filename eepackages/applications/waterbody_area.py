@@ -57,6 +57,9 @@ def computeSurfaceWaterArea(
         },
     )
 
+    # TODO: mosaic by day
+    # images = assets.mosaic_by_day(images)
+
     options = {
         # 'cloudFrequencyThresholdDelta': -0.15
         "scale": scale * 5,
