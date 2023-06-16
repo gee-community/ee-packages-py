@@ -68,8 +68,8 @@ def getImages(g, options):
             "to": ["swir", "nir", "red", "green", "blue"],
         },
         "L9": {
-            "from": ["B6", "B5", "B4", "B3", "B2", "B6", "B7"],
-            "to": ["swir", "nir", "red", "green", "blue", "swir1", "swir2"],
+            "from": ["B6", "B5", "B4", "B3", "B2"],
+            "to": ["swir", "nir", "red", "green", "blue"],
         },
         "L5": {
             "from": ["B5", "B4", "B3", "B2", "B1"],
