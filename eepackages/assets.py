@@ -155,10 +155,13 @@ def getImages(g, options):
 
     l9 = l9.select(bands["L9"]["from"], bands["L9"]["to"])
 
-    l8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_RT_TOA")
+    if options and "real_time" in options and options.get("real_time"):  # default to RT
+        l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_RT_TOA")
+    else:
+        l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_TOA")
 
     if options and "includeTier2" in options:
-        l8 = l8.merge(ee.ImageCollection("LANDSAT/LC08/C01/T2_TOA"))
+        l8 = l8.merge(ee.ImageCollection("LANDSAT/LC08/C02/T2_TOA"))
 
     l8 = l8.filterBounds(g)
 
@@ -172,10 +175,10 @@ def getImages(g, options):
 
     l8 = l8.select(bands["L8"]["from"], bands["L8"]["to"])
 
-    l5 = ee.ImageCollection("LANDSAT/LT05/C01/T1_TOA")
+    l5 = ee.ImageCollection("LANDSAT/LT05/C02/T1_TOA")
 
     if options and "includeTier2" in options:
-        l5 = l5.merge(ee.ImageCollection("LANDSAT/LT05/C01/T2_TOA"))
+        l5 = l5.merge(ee.ImageCollection("LANDSAT/LT05/C02/T2_TOA"))
 
     l5 = l5.filterBounds(g)
 
@@ -189,10 +192,10 @@ def getImages(g, options):
 
     l5 = l5.select(bands["L5"]["from"], bands["L5"]["to"])
 
-    l4 = ee.ImageCollection("LANDSAT/LT04/C01/T1_TOA")
+    l4 = ee.ImageCollection("LANDSAT/LT04/C02/T1_TOA")
 
     if options and "includeTier2" in options:
-        l4 = l4.merge(ee.ImageCollection("LANDSAT/LT04/C01/T2_TOA"))
+        l4 = l4.merge(ee.ImageCollection("LANDSAT/LT04/C02/T2_TOA"))
 
     l4 = l4.filterBounds(g)
 
@@ -206,10 +209,13 @@ def getImages(g, options):
 
     l4 = l4.select(bands["L4"]["from"], bands["L4"]["to"])
 
-    l7 = ee.ImageCollection("LANDSAT/LE07/C01/T1_RT_TOA")
+    if options and "real_time" in options and options.get("real_time"):  # default to RT
+        l7 = ee.ImageCollection("LANDSAT/LE07/C02/T1_RT_TOA")
+    else:
+        l7 = ee.ImageCollection("LANDSAT/LE07/C02/T1_TOA")
 
     if options and "includeTier2" in options:
-        l7 = l7.merge(ee.ImageCollection("LANDSAT/LE07/C01/T2_TOA"))
+        l7 = l7.merge(ee.ImageCollection("LANDSAT/LE07/C02/T2_TOA"))
 
     l7 = l7.filterBounds(g)
 
