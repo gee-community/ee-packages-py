@@ -5,7 +5,7 @@ import re
 from setuptools import find_packages
 from setuptools import setup
 
-__version__ = "0.27.0"
+__version__ = "0.28.0"
 
 
 def read(filename):
