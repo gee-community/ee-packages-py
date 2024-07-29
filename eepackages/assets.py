@@ -155,10 +155,10 @@ def getImages(g, options):
 
     l9 = l9.select(bands["L9"]["from"], bands["L9"]["to"])
 
-    l8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_RT_TOA")
+    l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_RT_TOA")
 
     if options and "includeTier2" in options:
-        l8 = l8.merge(ee.ImageCollection("LANDSAT/LC08/C01/T2_TOA"))
+        l8 = l8.merge(ee.ImageCollection("LANDSAT/LC08/C02/T2_TOA"))
 
     l8 = l8.filterBounds(g)
 
@@ -172,10 +172,10 @@ def getImages(g, options):
 
     l8 = l8.select(bands["L8"]["from"], bands["L8"]["to"])
 
-    l5 = ee.ImageCollection("LANDSAT/LT05/C01/T1_TOA")
+    l5 = ee.ImageCollection("LANDSAT/LT05/C02/T1_TOA")
 
     if options and "includeTier2" in options:
-        l5 = l5.merge(ee.ImageCollection("LANDSAT/LT05/C01/T2_TOA"))
+        l5 = l5.merge(ee.ImageCollection("LANDSAT/LT05/C02/T2_TOA"))
 
     l5 = l5.filterBounds(g)
 
@@ -189,10 +189,10 @@ def getImages(g, options):
 
     l5 = l5.select(bands["L5"]["from"], bands["L5"]["to"])
 
-    l4 = ee.ImageCollection("LANDSAT/LT04/C01/T1_TOA")
+    l4 = ee.ImageCollection("LANDSAT/LT04/C02/T1_TOA")
 
     if options and "includeTier2" in options:
-        l4 = l4.merge(ee.ImageCollection("LANDSAT/LT04/C01/T2_TOA"))
+        l4 = l4.merge(ee.ImageCollection("LANDSAT/LT04/C02/T2_TOA"))
 
     l4 = l4.filterBounds(g)
 
@@ -206,10 +206,10 @@ def getImages(g, options):
 
     l4 = l4.select(bands["L4"]["from"], bands["L4"]["to"])
 
-    l7 = ee.ImageCollection("LANDSAT/LE07/C01/T1_RT_TOA")
+    l7 = ee.ImageCollection("LANDSAT/LE07/C02/T1_RT_TOA")
 
     if options and "includeTier2" in options:
-        l7 = l7.merge(ee.ImageCollection("LANDSAT/LE07/C01/T2_TOA"))
+        l7 = l7.merge(ee.ImageCollection("LANDSAT/LE07/C02/T2_TOA"))
 
     l7 = l7.filterBounds(g)
 
@@ -739,3 +739,97 @@ def otsu(histogram):
 
     #    Return the mean value corresponding to the maximum BSS.
     return means.sort(bss).get([-1])
+
+# Get the depth proxy of the image collection 
+def depth_proxy(image_col):
+
+    # Calculate NDWI of the image
+    def NDWI(image):
+        """Calculates the NDWI of an image
+        :param image: an image
+        :type: image: ee.Image
+        :return: An image with a single ndwi band
+        :rtype: ee.Image
+        """
+        ndwi = image.normalizedDifference(["green", "nir"]).rename("ndwi")
+
+        return image.addBands(ndwi)
+
+    # Identify water in the image
+    def ndwiWater(image):
+        """Identifies water in an image based on the ndwi and a threshold value
+        :param image: an image
+        :type: image: ee.Image
+        :return: An image where water is identified as 1 and non-water as 0
+        :rtype: ee.Image
+        """
+        # water threshold
+        # TODO: replace by Otsu (see ppt on intertidal algs decision otsu from Kel Markert)
+        ndwiThreshold = 0.2
+
+        # find the water using a fixed NDWI threshold
+        NDWIWater = image.select("ndwi").gt(ndwiThreshold).rename("ndwi_water")
+
+        # TODO: check influence of this waterclean function on output
+        # clean up the image
+        # look into dilation in morphology module
+        connectedPixelSize = 512  # this can cause an internal error if set too high (1024 created errors for some cells)
+
+        def waterClean(image, size):
+            connectedPixels = image.int().connectedPixelCount(size)
+            pixelCountWhere = image.where(connectedPixels.lt(size), 0)
+            return pixelCountWhere
+
+        # imageCleaned = NDWIWater
+        imageCleaned = waterClean(NDWIWater, connectedPixelSize)
+        imageCleanedWeight = imageCleaned.multiply(image.select("weight")).rename(
+            "ndwi_waterweight"
+        )
+
+        time = image.get("system:time_start")
+
+        imageCleaned.set("system:time_start", time)
+        imageCleanedWeight.set("system:time_start", time)
+
+        return image.addBands(imageCleaned).addBands(imageCleanedWeight)
+
+    # filter out images without GTSM data coupled to it & sort by water level
+    Collection_fil = image_col
+    # GTSMCollection_fil = GTSMCollection.filter(ee.Filter.eq('gtsm_gebco_data_isempty', False))
+    Collection_filsort = Collection_fil.sort("gtsm_waterlevel") # default is ascending, if applicable
+
+    # map NDWI over entire imagecollection, either the non-filtered one (if no GTSM data was found) or the filtered one (if GTSM data was found)
+    #NDWICollectionGTSM = ee.ImageCollection(GTSMCollection_filsort.map(NDWI))
+    NDWICollection = ee.ImageCollection(Collection_filsort.map(NDWI))
+    #NDWICollection = ee.ImageCollection(ee.Algorithms.If(empty, GTSMCollection.map(NDWI), GTSMCollection_filsort.map(NDWI)))
+    #NDWICollection = sdb._refined_images.map(NDWI)
+
+    # map to absolute pixel values (1 for water) and (0 for non-water) in NDWI images
+    #NDWICollectionGTSMMapped = NDWICollectionGTSM.map(ndwiWater)
+    NDWICollectionMapped = ee.ImageCollection(NDWICollection.map(ndwiWater))
+
+    # calculate water occurrence of the collection
+    waterReduceSum = NDWICollectionMapped.select("ndwi_water").reduce(ee.Reducer.sum()).int16().rename('waterOccurrenceCount') # count number of water occurrences at each pixel
+    #waterReduceSum = waterReduceSum.where(waterReduceSum.eq(1), 0) #remove pixels that only have 1 for water occurence, TODO: QA check - review this
+    waterPercentage = waterReduceSum.divide(NDWICollectionMapped.size()).multiply(100).rename('waterOccurrencePercentage').addBands(waterReduceSum) #calculates the water occurence % (mean*100)
+    mask = waterPercentage.select('waterOccurrenceCount').mask() #adds the image collection size as a band
+    bandCollectionLength = ee.Image.constant(NDWICollectionMapped.size()).uint16().rename('numberOfImagesAnalysed').updateMask(mask)
+    gridCellWaterOccurrenceOutput = waterPercentage.addBands(bandCollectionLength) #add a band within the water occurrence image that holds the number of images used to calculate the water occurrence
+
+    # weighted average (iso mean of water occurence)
+    # .map(lambda i: i.select("ndwi_water").multiply(i.select("weight")))
+    # TODO: check ndwi_waterweight output vs .map lambda output
+    waterReduceSumWeighted = NDWICollectionMapped.select("ndwi_waterweight").reduce(ee.Reducer.sum()).int16().rename('waterOccurrenceCountWeighted') # count number of water occurrences at each pixel
+    bandCollectionLengthWeighted = NDWICollectionMapped.select("weight").reduce(ee.Reducer.sum()).int16().rename('numberOfImagesAnalysedWeighted') # count number of water occurrences at each pixel
+    waterPercentageWeighted = NDWICollectionMapped.select("ndwi_waterweight")\
+                            .sum()\
+                            .divide(NDWICollectionMapped.select("weight").sum())\
+                            .multiply(100)\
+                            .rename("waterOccurrencePercentageWeighted")
+    gridCellWaterOccurrenceOutput = gridCellWaterOccurrenceOutput.addBands(waterPercentageWeighted).addBands(waterReduceSumWeighted).addBands(bandCollectionLengthWeighted) #add bands to the water occurrence image
+
+    # create median NDWI band (note, not used now)
+    ndwiMedian = NDWICollectionMapped.select("ndwi").median().rename('ndwiMedian') #calculate the median NDWI
+    gridCellWaterOccurrenceOutput = gridCellWaterOccurrenceOutput.addBands(ndwiMedian) #add ndwiMedian as a band to the water occurrence image
+
+    return gridCellWaterOccurrenceOutput, NDWICollectionMapped
