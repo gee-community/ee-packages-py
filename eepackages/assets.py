@@ -258,7 +258,8 @@ def getImages(g, options):
 
     resample = "bicubic"
 
-    s2 = s2.map(lambda i: i.resample(resample))
+    if resample:
+        s2 = s2.map(lambda i: i.resample(resample))
 
     # merge by time (remove duplicates)
     if s2MergeByTime:

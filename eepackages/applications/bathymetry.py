@@ -432,6 +432,8 @@ class Bathymetry(object):
                 opt_neighborhoodOptions=neighborhood_search_parameters,
             )
 
+        self._adjusted_images = images
+
         if not skip_scene_boundary_fix:
 
             def fix_scene_boundaries(i: ee.Image) -> ee.Image:
