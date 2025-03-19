@@ -10,7 +10,7 @@ from eepackages import utils
 # TODO: Jaap to clean up this script following the same style as original product
 
 # load GTSM & gebco data
-gtsm_col = ee.FeatureCollection("projects/bathymetry/assets/gtsm_waterlevels")
+gtsm_col = ee.FeatureCollection("projects/bathymetry/assets/gtsm_waterlevels_2021_v2")
 gebco_image = ee.Image("projects/bathymetry/assets/gebco_2023_hat_lat")
 
 
@@ -544,8 +544,7 @@ class Bathymetry(object):
 
     # Add gtsm and gebco data to images
     @staticmethod
-    def add_gtsm_gebco_data_to_images(image, gtsm_col, tile=ee.Feature(None), max_temporal_offset=10):
-                                    #max_spatial_offset=1, max_temporal_offset=10):
+    def add_gtsm_gebco_data_to_images(image, gtsm_col, tile=ee.Feature(None), max_spatial_offset=1, max_temporal_offset=10):
         ''' Add gtsm and gebco data to images.
 
         :param image: Image to which gtsm data is added.
@@ -559,38 +558,24 @@ class Bathymetry(object):
         :param max_temporal_offset: Maximum temporal offset in minutes
         :type max_temporal_offset: float (default=10)
         '''
-        
-        # If tile geometry is not provided, set tile geometry to image geometry
-        # tile = ee.Feature(ee.Algorithms.If(ee.Algorithms.IsEqual(tile.geometry(), None),
-        # 								   ee.Feature(image.geometry()),
-        # 								   tile)) # NOTE, commented out because we always map over a tile?
 
-        # Get area around the tile
-        tile_centroid = ee.Geometry.centroid(tile.geometry(), maxError=1)
-        # tile_footprint = ee.Geometry(tile.geometry())
-        tile_dist = ee.Number(tile.get("gtsm_distance"))
-        # tile_buffer = tile_footprint.buffer(max_spatial_offset*1000)
-        tile_buffer = tile_centroid.buffer(tile_dist.add(tile_dist.multiply(0.1))) # add small 10% extra buffer to be sure we capture the GTSM point (our dist calc is a little diff than GEE's)
-
-        # Construct the station id filter
-        #filter = ee.Filter.eq('station', ee.Number(tile.get("gtsm_station")))
+        # Get area around nearest station
+        station_point = ee.Geometry.Point(ee.Number(tile.get('nearest_station_longitude')), ee.Number(tile.get('nearest_station_latitude')))
+        station_buffer = station_point.buffer(max_spatial_offset*1000)
 
         # Get period around image time
         image_time_start = ee.Date(image.get('system:time_start'))
-        # image_time_end = ee.Date(ee.Algorithms.If(image.get('system:time_end'),
-        # 										  ee.Date(image.get('system:time_end')),
-        # 										  image_time_start))
-        image_time_end = ee.Date(image.get('system:time_start')) # TODO: fix nicely with time_end.. 
+        image_time_end = ee.Date(image.get('system:time_start')) # TODO: fix nicely with time_end.
         image_time = ee.Date(image_time_start.millis().add(image_time_end.millis()).divide(2))
         image_period = ee.DateRange(ee.Date(image_time_start.millis().subtract(max_temporal_offset*60*1000)),
                                     ee.Date(image_time_end.millis().add(max_temporal_offset*60*1000)))
         
-        # Filter gtsm station and period
-        #gtsm_col = gtsm_col.filter(filter)
-        gtsm_col = gtsm_col.filterBounds(tile_buffer)
+        # Filter gtsm collection on station and period
+        gtsm_col = gtsm_col.filterBounds(station_buffer)
         gtsm_col = gtsm_col.filterDate(image_period.start(), image_period.end())
 
         # Add spatial offset to features
+        tile_centroid = ee.Geometry.centroid(tile.geometry(), maxError=1)
         def add_spatial_offset_to_features(feature):
             return feature.set('spatial offset to image', feature.distance(ee.Feature(tile_centroid))) #tile_dist
         gtsm_col = gtsm_col.map(add_spatial_offset_to_features)
