@@ -466,7 +466,8 @@ class Bathymetry(object):
             tile = ee.Feature(bounds)
 
         # map GTSM & GEBCO on the image collection
-        GTSMcol = images.map(
+        GTSMcol = images.select(["green", "nir", "weight"])
+        GTSMcol = GTSMcol.map(
             lambda image: self.add_gtsm_gebco_data_to_images(
                 image.clip(bounds), gtsm_col, tile
             )
@@ -475,20 +476,20 @@ class Bathymetry(object):
         filteredGTSM = GTSMcol.filter(
             ee.Filter.notNull(["gtsm_feature"])
         )  # images with matching GTSM data
-        filteredNoGTSM = GTSMcol.filter(
-            ee.Filter.notNull(["gtsm_feature"]).Not()
-        )  # images without matching GTSM data
+        # filteredNoGTSM = GTSMcol.filter(
+        #     ee.Filter.notNull(["gtsm_feature"]).Not()
+        # )  # images without matching GTSM data
 
         # map collection to set image properties
         filteredGTSM = filteredGTSM.map(
             lambda image: self.set_gtsm_gebco_data_to_images(image, gebco_image)
         )
-        filteredNoGTSM = filteredNoGTSM.map(
-            lambda image: image.set({"gtsm_gebco_data_isempty": True})
-        )  # True
+        # filteredNoGTSM = filteredNoGTSM.map(
+        #     lambda image: image.set({"gtsm_gebco_data_isempty": True})
+        # )  # True
 
         self._images_WLinfo = filteredGTSM
-        self._images_NoWLinfo = filteredNoGTSM
+        # self._images_NoWLinfo = filteredNoGTSM
 
         # Below comes a complex situation because we want to use getInfo & ee.Algorithms.if as little as possible so we need to work with map & filters, yet, we cannot succeed to get rid of all
         # the ee.Algorithms.if because we have 3 options; all data in filteredGTSM, data in both filteredGTSM & filteredNoGTSM and data in only filteredNoGTSM. In case of the former two,
@@ -498,36 +499,40 @@ class Bathymetry(object):
         # collection if we have it.. Tried to get rid of ee.Algs.If by refactoring completely BUT this was slower as we needed 3 more steps to get to same result (see GH commit f61d92b on 13 Augt 2024).
 
         # compute bool_empty ImageCollection is empty
-        bool_empty_filGTSM = filteredGTSM.size().eq(0)
-        bool_empty_filNoGTSM = filteredNoGTSM.size().eq(0)
+        # bool_empty_filGTSM = filteredGTSM.size().eq(0)
+        # bool_empty_filNoGTSM = filteredNoGTSM.size().eq(0)
 
         # Use two server-side conditional statements to keep memory usage low by comparing against an empty imagecollection as both true and false conditions are calculated at once.
         # See: https://developers.google.com/earth-engine/apidocs/ee-algorithms-if
+        # image_calib = ee.Image(
+        #     ee.Algorithms.If(
+        #         bool_empty_filGTSM,
+        #         ee.ImageCollection([]).first(),
+        #         self.compute_bathy_GTSM(filteredGTSM),
+        #     )
+        # )
         image_calib = ee.Image(
-            ee.Algorithms.If(
-                bool_empty_filGTSM,
-                ee.ImageCollection([]).first(),
-                self.compute_bathy_GTSM(filteredGTSM),
-            )
-        )
-        image_uncalib = ee.Image(
-            ee.Algorithms.If(
-                bool_empty_filNoGTSM,
-                ee.ImageCollection([]).first(),
-                self.compute_proxy_NoGTSM(filteredNoGTSM),
-            )
-        )
+            self.compute_bathy_GTSM(filteredGTSM)
+        )  # this assumes we have a tile with a GTSM station coupled and at least one image has a match with GTSM over time..
+        # image_uncalib = ee.Image(
+        #     ee.Algorithms.If(
+        #         bool_empty_filNoGTSM,
+        #         ee.ImageCollection([]).first(),
+        #         self.compute_proxy_NoGTSM(filteredNoGTSM),
+        #     )
+        # )
 
         self._image_bathy = image_calib
-        self._image_proxy = image_uncalib
+        # self._image_proxy = image_uncalib
 
         # merge the images
-        image_bp = ee.ImageCollection(
-            [image_calib, image_uncalib]
-        )  # TODO: filter out empty image
-        image = (
-            image_bp.first()
-        )  # this selects the first image; image_calib (bathy) if it exists, else image_uncalib (proxy),
+        # image_bp = ee.ImageCollection(
+        #     [image_calib, image_uncalib]
+        # )  # TODO: filter out empty image
+        # image = (
+        #     image_bp.first()
+        # )  # this selects the first image; image_calib (bathy) if it exists, else image_uncalib (proxy),
+        image = image_calib
 
         # END ADD-INS
 
@@ -874,21 +879,21 @@ class Bathymetry(object):
             # intertidal elevation and tidal stage (couple all)
             # short-cut to produce only the linear wlmax-wlmin scaled image to get the tidally corrected output with the overal (median or) mean NWDI image (water occurrence)
             # TODO: check the effect of this compared to the tidal stage intervals output.. (non-linear)
-            waterElev = (
-                gridCellWaterOccurrenceOutput.select("waterOccurrencePercentage")
-                .unitScale(0, 100)
-                .multiply(
-                    ee.Number(NDWICollectionGTSMMapped.get("min_water_level")).subtract(
-                        ee.Number(NDWICollectionGTSMMapped.get("max_water_level"))
-                    )
-                )
-                .add(ee.Number(NDWICollectionGTSMMapped.get("max_water_level")))
-                .rename("intertidal_elevation")
-                .toFloat()
-            )
-            gridCellWaterOccurrenceOutput = gridCellWaterOccurrenceOutput.addBands(
-                waterElev
-            )  # add intertidal elevation as a band to the water occurrence image
+            # waterElev = (
+            #     gridCellWaterOccurrenceOutput.select("waterOccurrencePercentage")
+            #     .unitScale(0, 100)
+            #     .multiply(
+            #         ee.Number(NDWICollectionGTSMMapped.get("min_water_level")).subtract(
+            #             ee.Number(NDWICollectionGTSMMapped.get("max_water_level"))
+            #         )
+            #     )
+            #     .add(ee.Number(NDWICollectionGTSMMapped.get("max_water_level")))
+            #     .rename("intertidal_elevation")
+            #     .toFloat()
+            # )
+            # gridCellWaterOccurrenceOutput = gridCellWaterOccurrenceOutput.addBands(
+            #     waterElev
+            # )  # add intertidal elevation as a band to the water occurrence image
             waterElevWeight = (
                 gridCellWaterOccurrenceOutput.select(
                     "waterOccurrencePercentageWeighted"
