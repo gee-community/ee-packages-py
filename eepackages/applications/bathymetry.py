@@ -351,7 +351,7 @@ class Bathymetry(object):
         )
 
         return image
-    
+
     def compute_intertidal_depth(
         self,
         bounds,
@@ -452,7 +452,7 @@ class Bathymetry(object):
                 )
                 mask = ee.Image.constant(1).subtract(mask)
 
-                weight = weight.multiply(mask)
+                weight = weight.multiply(mask).toFloat()
 
                 return i.addBands(srcImg=weight, overwrite=True)
 
@@ -466,40 +466,68 @@ class Bathymetry(object):
             tile = ee.Feature(bounds)
 
         # map GTSM & GEBCO on the image collection
-        GTSMcol = images.map(lambda image: self.add_gtsm_gebco_data_to_images(image.clip(bounds), gtsm_col, tile)) # TODO: test.clip(bounds) 
+        GTSMcol = images.map(
+            lambda image: self.add_gtsm_gebco_data_to_images(
+                image.clip(bounds), gtsm_col, tile
+            )
+        )  # TODO: test.clip(bounds)
 
-        filteredGTSM = GTSMcol.filter(ee.Filter.notNull(['gtsm_feature'])) # images with matching GTSM data
-        filteredNoGTSM = GTSMcol.filter(ee.Filter.notNull(['gtsm_feature']).Not()) # images without matching GTSM data
+        filteredGTSM = GTSMcol.filter(
+            ee.Filter.notNull(["gtsm_feature"])
+        )  # images with matching GTSM data
+        filteredNoGTSM = GTSMcol.filter(
+            ee.Filter.notNull(["gtsm_feature"]).Not()
+        )  # images without matching GTSM data
 
         # map collection to set image properties
-        filteredGTSM = filteredGTSM.map(lambda image: self.set_gtsm_gebco_data_to_images(image, gebco_image))
-        filteredNoGTSM = filteredNoGTSM.map(lambda image: image.set({'gtsm_gebco_data_isempty': True})) #True
+        filteredGTSM = filteredGTSM.map(
+            lambda image: self.set_gtsm_gebco_data_to_images(image, gebco_image)
+        )
+        filteredNoGTSM = filteredNoGTSM.map(
+            lambda image: image.set({"gtsm_gebco_data_isempty": True})
+        )  # True
 
         self._images_WLinfo = filteredGTSM
         self._images_NoWLinfo = filteredNoGTSM
 
         # Below comes a complex situation because we want to use getInfo & ee.Algorithms.if as little as possible so we need to work with map & filters, yet, we cannot succeed to get rid of all
-        # the ee.Algorithms.if because we have 3 options; all data in filteredGTSM, data in both filteredGTSM & filteredNoGTSM and data in only filteredNoGTSM. In case of the former two, 
-        # get_tide_offsets_and_spread and calibrated_bathy get data with GTSM info coupled and everything works fine. In case of the latter, it will break without if statement because these 
-        # functions cannot handle zero imagecollections.. The crux is really in the get_tide_offsets_and_spread. We cannot combine the two imagecollections before because it will break on data 
+        # the ee.Algorithms.if because we have 3 options; all data in filteredGTSM, data in both filteredGTSM & filteredNoGTSM and data in only filteredNoGTSM. In case of the former two,
+        # get_tide_offsets_and_spread and calibrated_bathy get data with GTSM info coupled and everything works fine. In case of the latter, it will break without if statement because these
+        # functions cannot handle zero imagecollections.. The crux is really in the get_tide_offsets_and_spread. We cannot combine the two imagecollections before because it will break on data
         # without GTSM info. We also cannot combine after because it will break on an empty filteredGTSM list (latter option). Besides, we want to keep them seperate to calibrate the filteredGTSM
-        # collection if we have it.. Tried to get rid of ee.Algs.If by refactoring completely BUT this was slower as we needed 3 more steps to get to same result (see GH commit f61d92b on 13 Augt 2024). 
+        # collection if we have it.. Tried to get rid of ee.Algs.If by refactoring completely BUT this was slower as we needed 3 more steps to get to same result (see GH commit f61d92b on 13 Augt 2024).
 
         # compute bool_empty ImageCollection is empty
         bool_empty_filGTSM = filteredGTSM.size().eq(0)
         bool_empty_filNoGTSM = filteredNoGTSM.size().eq(0)
 
-        # Use two server-side conditional statements to keep memory usage low by comparing against an empty imagecollection as both true and false conditions are calculated at once. 
+        # Use two server-side conditional statements to keep memory usage low by comparing against an empty imagecollection as both true and false conditions are calculated at once.
         # See: https://developers.google.com/earth-engine/apidocs/ee-algorithms-if
-        image_calib = ee.Image(ee.Algorithms.If(bool_empty_filGTSM, ee.ImageCollection([]).first(), self.compute_bathy_GTSM(filteredGTSM)))
-        image_uncalib = ee.Image(ee.Algorithms.If(bool_empty_filNoGTSM, ee.ImageCollection([]).first(), self.compute_proxy_NoGTSM(filteredNoGTSM)))
+        image_calib = ee.Image(
+            ee.Algorithms.If(
+                bool_empty_filGTSM,
+                ee.ImageCollection([]).first(),
+                self.compute_bathy_GTSM(filteredGTSM),
+            )
+        )
+        image_uncalib = ee.Image(
+            ee.Algorithms.If(
+                bool_empty_filNoGTSM,
+                ee.ImageCollection([]).first(),
+                self.compute_proxy_NoGTSM(filteredNoGTSM),
+            )
+        )
 
         self._image_bathy = image_calib
         self._image_proxy = image_uncalib
 
         # merge the images
-        image_bp = ee.ImageCollection([image_calib, image_uncalib]) # TODO: filter out empty image
-        image = image_bp.first() # this selects the first image; image_calib (bathy) if it exists, else image_uncalib (proxy), 
+        image_bp = ee.ImageCollection(
+            [image_calib, image_uncalib]
+        )  # TODO: filter out empty image
+        image = (
+            image_bp.first()
+        )  # this selects the first image; image_calib (bathy) if it exists, else image_uncalib (proxy),
 
         # END ADD-INS
 
@@ -544,8 +572,14 @@ class Bathymetry(object):
 
     # Add gtsm and gebco data to images
     @staticmethod
-    def add_gtsm_gebco_data_to_images(image, gtsm_col, tile=ee.Feature(None), max_spatial_offset=1, max_temporal_offset=10):
-        ''' Add gtsm and gebco data to images.
+    def add_gtsm_gebco_data_to_images(
+        image,
+        gtsm_col,
+        tile=ee.Feature(None),
+        max_spatial_offset=1,
+        max_temporal_offset=10,
+    ):
+        """Add gtsm and gebco data to images.
 
         :param image: Image to which gtsm data is added.
         :type image: ee.Image
@@ -557,45 +591,74 @@ class Bathymetry(object):
         # :type max_spatial_offset: float (default=1)
         :param max_temporal_offset: Maximum temporal offset in minutes
         :type max_temporal_offset: float (default=10)
-        '''
+        """
 
         # Get area around nearest station
-        station_point = ee.Geometry.Point(ee.Number(tile.get('nearest_station_longitude')), ee.Number(tile.get('nearest_station_latitude')))
-        station_buffer = station_point.buffer(max_spatial_offset*1000)
+        station_point = ee.Geometry.Point(
+            ee.Number(tile.get("nearest_station_longitude")),
+            ee.Number(tile.get("nearest_station_latitude")),
+        )
+        station_buffer = station_point.buffer(max_spatial_offset * 1000)
 
         # Get period around image time
-        image_time_start = ee.Date(image.get('system:time_start'))
-        image_time_end = ee.Date(image.get('system:time_start')) # TODO: fix nicely with time_end.
-        image_time = ee.Date(image_time_start.millis().add(image_time_end.millis()).divide(2))
-        image_period = ee.DateRange(ee.Date(image_time_start.millis().subtract(max_temporal_offset*60*1000)),
-                                    ee.Date(image_time_end.millis().add(max_temporal_offset*60*1000)))
-        
+        image_time_start = ee.Date(image.get("system:time_start"))
+        image_time_end = ee.Date(
+            image.get("system:time_start")
+        )  # TODO: fix nicely with time_end.
+        image_time = ee.Date(
+            image_time_start.millis().add(image_time_end.millis()).divide(2)
+        )
+        image_period = ee.DateRange(
+            ee.Date(
+                image_time_start.millis().subtract(max_temporal_offset * 60 * 1000)
+            ),
+            ee.Date(image_time_end.millis().add(max_temporal_offset * 60 * 1000)),
+        )
+
         # Filter gtsm collection on station and period
         gtsm_col = gtsm_col.filterBounds(station_buffer)
         gtsm_col = gtsm_col.filterDate(image_period.start(), image_period.end())
 
         # Add spatial offset to features
         tile_centroid = ee.Geometry.centroid(tile.geometry(), maxError=1)
+
         def add_spatial_offset_to_features(feature):
-            return feature.set('spatial offset to image', feature.distance(ee.Feature(tile_centroid))) #tile_dist
+            return feature.set(
+                "spatial offset to image", feature.distance(ee.Feature(tile_centroid))
+            )  # tile_dist
+
         gtsm_col = gtsm_col.map(add_spatial_offset_to_features)
 
         # Get minimum spatial offset
-        min_spatial_offset = gtsm_col.reduceColumns(ee.Reducer.min(), ['spatial offset to image']).get('min')
-        
+        min_spatial_offset = gtsm_col.reduceColumns(
+            ee.Reducer.min(), ["spatial offset to image"]
+        ).get("min")
+
         # Get features for which the spatial offset is equal to the minimum spatial offset (multiple features possible)
-        gtsm_col = gtsm_col.filter(ee.Filter.eq('spatial offset to image', min_spatial_offset))
+        gtsm_col = gtsm_col.filter(
+            ee.Filter.eq("spatial offset to image", min_spatial_offset)
+        )
 
         # Add temporal offset to features
         def add_temporal_offset_to_features(feature):
-            return feature.set('temporal offset to image', ee.Number(feature.get('system:time_start')).subtract(image_time.millis()).abs())
+            return feature.set(
+                "temporal offset to image",
+                ee.Number(feature.get("system:time_start"))
+                .subtract(image_time.millis())
+                .abs(),
+            )
+
         gtsm_col = gtsm_col.map(add_temporal_offset_to_features)
 
         # Get minimum temporal offset
-        min_temporal_offset = gtsm_col.reduceColumns(ee.Reducer.min(), ['temporal offset to image']).get('min')
+        min_temporal_offset = gtsm_col.reduceColumns(
+            ee.Reducer.min(), ["temporal offset to image"]
+        ).get("min")
 
         # Get features for which the temporal offset is equal to the minimum temporal offset (multiple features possible)
-        gtsm_col = gtsm_col.filter(ee.Filter.eq('temporal offset to image', min_temporal_offset))
+        gtsm_col = gtsm_col.filter(
+            ee.Filter.eq("temporal offset to image", min_temporal_offset)
+        )
 
         # Add GTSM feature to image
         image = image.set("gtsm_feature", gtsm_col.first())
@@ -604,8 +667,8 @@ class Bathymetry(object):
 
     # Set gtsm and gebco data to images
     @staticmethod
-    def set_gtsm_gebco_data_to_images(image, gebco_image, max_spatial_offset=1): 
-        ''' Add gtsm and gebco data to images.
+    def set_gtsm_gebco_data_to_images(image, gebco_image, max_spatial_offset=1):
+        """Add gtsm and gebco data to images.
 
         :param image: Image to which gtsm data is added.
         :type image: ee.Image
@@ -613,40 +676,56 @@ class Bathymetry(object):
         :type gebco_image: ee.Image
         :param max_spatial_offset: Maximum spatial offset in kilometers for getting the GEBCO data connected to the GTSM station
         :type max_spatial_offset: float (default=1)
-        '''
+        """
 
         # Get gtsm feature
-        gtsm_feature = ee.Feature(image.get('gtsm_feature'))
+        gtsm_feature = ee.Feature(image.get("gtsm_feature"))
 
         # Get station buffer
-        station_buffer = ee.Geometry(gtsm_feature.geometry().buffer(max_spatial_offset*1000))
-        
+        station_buffer = ee.Geometry(
+            gtsm_feature.geometry().buffer(max_spatial_offset * 1000)
+        )
+
         # Get gebco highest and lowest astronomical tide data
         # TODO: we might change this to the tile geometry to get a better max and min estimate..
-        gebco_data = ee.Dictionary(gebco_image.reduceRegion(reducer=ee.Reducer.mean(), geometry=station_buffer, scale=30))
-        
+        gebco_data = ee.Dictionary(
+            gebco_image.reduceRegion(
+                reducer=ee.Reducer.mean(), geometry=station_buffer, scale=30
+            )
+        )
+
         # Get gtsm tidal stage percentage: (WL - LAT) / (HAT - LAT) * 100
         def get_gtsm_tidal_stage_percentage(gtsm_feature, gebco_data):
-            wl = ee.Number(gtsm_feature.get('waterlevel'))
-            lat = ee.Number(gebco_data.get('b2'))
-            hat = ee.Number(gebco_data.get('b1'))
+            wl = ee.Number(gtsm_feature.get("waterlevel"))
+            lat = ee.Number(gebco_data.get("b2"))
+            hat = ee.Number(gebco_data.get("b1"))
             return wl.subtract(lat).divide(hat.subtract(lat)).multiply(100)
-        
-        gtsm_tidal_stage_percentage = ee.Number(get_gtsm_tidal_stage_percentage(gtsm_feature, gebco_data))
-        
+
+        gtsm_tidal_stage_percentage = ee.Number(
+            get_gtsm_tidal_stage_percentage(gtsm_feature, gebco_data)
+        )
+
         # Set gtsm en gebco data to image
-        image = image.set({'gtsm_gebco_data_isempty': False, 
-                            'gtsm_station': gtsm_feature.get('station'),
-                            'gtsm_station_lon': gtsm_feature.geometry().coordinates().get(0),
-                            'gtsm_station_lat': gtsm_feature.geometry().coordinates().get(1),
-                            'gtsm_station_spatial_offset': gtsm_feature.get('spatial offset to image'),
-                            'gtsm_station_temporal_offset': gtsm_feature.get('temporal offset to image'),
-                            'gtsm_time': gtsm_feature.get('times'),
-                            'gtsm_waterlevel': gtsm_feature.get('waterlevel'),
-                            'gebco_hat': gebco_data.get('b1'),
-                            'gebco_lat': gebco_data.get('b2'),
-                            'gtsm_tidal_stage_percentage': gtsm_tidal_stage_percentage})
-        
+        image = image.set(
+            {
+                "gtsm_gebco_data_isempty": False,
+                "gtsm_station": gtsm_feature.get("station"),
+                "gtsm_station_lon": gtsm_feature.geometry().coordinates().get(0),
+                "gtsm_station_lat": gtsm_feature.geometry().coordinates().get(1),
+                "gtsm_station_spatial_offset": gtsm_feature.get(
+                    "spatial offset to image"
+                ),
+                "gtsm_station_temporal_offset": gtsm_feature.get(
+                    "temporal offset to image"
+                ),
+                "gtsm_time": gtsm_feature.get("times"),
+                "gtsm_waterlevel": gtsm_feature.get("waterlevel"),
+                "gebco_hat": gebco_data.get("b1"),
+                "gebco_lat": gebco_data.get("b2"),
+                "gtsm_tidal_stage_percentage": gtsm_tidal_stage_percentage,
+            }
+        )
+
         # Return image
         return image
 
@@ -659,41 +738,51 @@ class Bathymetry(object):
 
         # Get additional info in imagecollection
         def get_additional_info_imagecol(image_col):
-            ''' Get additional info added to the image collection.
+            """Get additional info added to the image collection.
 
             :param image_col: Image collection
             :type image_col: ee.ImageCollection
-            '''
+            """
 
             # get single values as per gtsm station, lon, lat, spatial offset, gebco hat & lat
-            gtsm_station = image_col.first().get('gtsm_station') # assuming this is the same everywhere, which is true since we use the tile as geometry
-            gtsm_station_lon = image_col.first().get('gtsm_station_lon')
-            gtsm_station_lat = image_col.first().get('gtsm_station_lat')
-            gtsm_station_spatial_offset = image_col.first().get('gtsm_station_spatial_offset')
-            gebco_hat = image_col.first().get('gebco_hat')
-            gebco_lat = image_col.first().get('gebco_lat')
+            gtsm_station = image_col.first().get(
+                "gtsm_station"
+            )  # assuming this is the same everywhere, which is true since we use the tile as geometry
+            gtsm_station_lon = image_col.first().get("gtsm_station_lon")
+            gtsm_station_lat = image_col.first().get("gtsm_station_lat")
+            gtsm_station_spatial_offset = image_col.first().get(
+                "gtsm_station_spatial_offset"
+            )
+            gebco_hat = image_col.first().get("gebco_hat")
+            gebco_lat = image_col.first().get("gebco_lat")
 
             # get lists of values as per temporal offset, water level, quality score, system:time_start, gtsm time & gtsm tidal stage percentage
-            temporal_offset = image_col.aggregate_array('gtsm_station_temporal_offset')
-            water_level = image_col.aggregate_array('gtsm_waterlevel')
-            quality_score = image_col.aggregate_array('quality_score')
-            system_time_start = image_col.aggregate_array('system:time_start')
-            gtsm_time = image_col.aggregate_array('gtsm_time')
-            gtsm_tidal_stage_percentage = image_col.aggregate_array('gtsm_tidal_stage_percentage')
+            temporal_offset = image_col.aggregate_array("gtsm_station_temporal_offset")
+            water_level = image_col.aggregate_array("gtsm_waterlevel")
+            quality_score = image_col.aggregate_array("quality_score")
+            system_time_start = image_col.aggregate_array("system:time_start")
+            gtsm_time = image_col.aggregate_array("gtsm_time")
+            gtsm_tidal_stage_percentage = image_col.aggregate_array(
+                "gtsm_tidal_stage_percentage"
+            )
 
             # Add additional info to image collection
-            image_col = image_col.set({'gtsm_station': gtsm_station,
-                                    'gtsm_station_lon': gtsm_station_lon,
-                                    'gtsm_station_lat': gtsm_station_lat,
-                                    'gtsm_station_spatial_offset': gtsm_station_spatial_offset,
-                                    'gebco_hat': gebco_hat,
-                                    'gebco_lat': gebco_lat,
-                                    'gtsm_station_temporal_offsets': temporal_offset,
-                                    'gtsm_water_levels': water_level,
-                                    'quality_scores': quality_score,
-                                    'system_time_starts': system_time_start,
-                                    'gtsm_times': gtsm_time,
-                                    'gtsm_tidal_stage_percentages': gtsm_tidal_stage_percentage})
+            image_col = image_col.set(
+                {
+                    "gtsm_station": gtsm_station,
+                    "gtsm_station_lon": gtsm_station_lon,
+                    "gtsm_station_lat": gtsm_station_lat,
+                    "gtsm_station_spatial_offset": gtsm_station_spatial_offset,
+                    "gebco_hat": gebco_hat,
+                    "gebco_lat": gebco_lat,
+                    "gtsm_station_temporal_offsets": temporal_offset,
+                    "gtsm_water_levels": water_level,
+                    "quality_scores": quality_score,
+                    "system_time_starts": system_time_start,
+                    "gtsm_times": gtsm_time,
+                    "gtsm_tidal_stage_percentages": gtsm_tidal_stage_percentage,
+                }
+            )
 
             return image_col
 
@@ -701,43 +790,80 @@ class Bathymetry(object):
         filteredGTSM = get_additional_info_imagecol(filteredGTSM)
 
         # Get high tide offset, low tide offset and tide spread
-        # got rid of all ee.Algroithms.Ifs with filters: https://gis.stackexchange.com/questions/478868/update-featurecollection-property-values-based-on-condition-without-using-ee-al 
+        # got rid of all ee.Algroithms.Ifs with filters: https://gis.stackexchange.com/questions/478868/update-featurecollection-property-values-based-on-condition-without-using-ee-al
         def get_tide_offsets_and_spread(image_col):
-            ''' Get high tide offset, low tide offset and tide spread.
+            """Get high tide offset, low tide offset and tide spread.
 
             :param image_col: Image collection with gtsm and gebco data.
             :type image_col: ee.ImageCollection
-            '''
+            """
 
             # Filter images with gtsm and gebco data
-            #image_col_ = image_col.filterMetadata('gtsm_gebco_data_isempty', 'equals', False)
+            # image_col_ = image_col.filterMetadata('gtsm_gebco_data_isempty', 'equals', False)
 
             # Get high tide offset & max water level
-            high_tide_offset = ee.Number(ee.Number(100).subtract(ee.Number(image_col.reduceColumns(ee.Reducer.max(), ['gtsm_tidal_stage_percentage']).get('max'))))
-            max_wl = ee.Number(image_col.reduceColumns(ee.Reducer.max(), ['gtsm_waterlevel']).get('max'))
+            high_tide_offset = ee.Number(
+                ee.Number(100).subtract(
+                    ee.Number(
+                        image_col.reduceColumns(
+                            ee.Reducer.max(), ["gtsm_tidal_stage_percentage"]
+                        ).get("max")
+                    )
+                )
+            )
+            max_wl = ee.Number(
+                image_col.reduceColumns(ee.Reducer.max(), ["gtsm_waterlevel"]).get(
+                    "max"
+                )
+            )
 
             # Get low tide offset & min water level
-            low_tide_offset = ee.Number(image_col.reduceColumns(ee.Reducer.min(), ['gtsm_tidal_stage_percentage']).get('min'))
-            min_wl = ee.Number(image_col.reduceColumns(ee.Reducer.min(), ['gtsm_waterlevel']).get('min'))
+            low_tide_offset = ee.Number(
+                image_col.reduceColumns(
+                    ee.Reducer.min(), ["gtsm_tidal_stage_percentage"]
+                ).get("min")
+            )
+            min_wl = ee.Number(
+                image_col.reduceColumns(ee.Reducer.min(), ["gtsm_waterlevel"]).get(
+                    "min"
+                )
+            )
 
             # Get tide spread
-            tide_spread = ee.Number(ee.Number(100).subtract(high_tide_offset).subtract(low_tide_offset))
+            tide_spread = ee.Number(
+                ee.Number(100).subtract(high_tide_offset).subtract(low_tide_offset)
+            )
 
             # Add high tide offset, low tide offset and tide spread to image collection properties
-            image_col = image_col.set({'gtsm_gebco_data_allempty': False,
-                                        'high_tide_offset': high_tide_offset,
-                                        'low_tide_offset': low_tide_offset,
-                                        'max_water_level': max_wl,
-                                        'min_water_level': min_wl,
-                                        'tide_spread': tide_spread})
-                
-            return image_col, high_tide_offset, low_tide_offset, max_wl, min_wl, tide_spread
+            image_col = image_col.set(
+                {
+                    "gtsm_gebco_data_allempty": False,
+                    "high_tide_offset": high_tide_offset,
+                    "low_tide_offset": low_tide_offset,
+                    "max_water_level": max_wl,
+                    "min_water_level": min_wl,
+                    "tide_spread": tide_spread,
+                }
+            )
+
+            return (
+                image_col,
+                high_tide_offset,
+                low_tide_offset,
+                max_wl,
+                min_wl,
+                tide_spread,
+            )
 
         # get tide offsets and spread
-        filteredGTSM, HTO, LTO, MAWL, MIWL, SPR = get_tide_offsets_and_spread(filteredGTSM) # gives an error for empty filteredGTSM collections... might merge into calibrated bathy
+        filteredGTSM, HTO, LTO, MAWL, MIWL, SPR = get_tide_offsets_and_spread(
+            filteredGTSM
+        )  # gives an error for empty filteredGTSM collections... might merge into calibrated bathy
 
         # get depth proxy
-        gridCellWaterOccurrenceOutput, NDWICollectionGTSMMapped = assets.depth_proxy(filteredGTSM)
+        gridCellWaterOccurrenceOutput, NDWICollectionGTSMMapped = assets.depth_proxy(
+            filteredGTSM
+        )
 
         # Calculate the calibrated bathymetry
         def calibrated_bathy(image_col, NDWI_col, HTO, LTO, MAWL, MIWL, SPR):
@@ -748,48 +874,96 @@ class Bathymetry(object):
             # intertidal elevation and tidal stage (couple all)
             # short-cut to produce only the linear wlmax-wlmin scaled image to get the tidally corrected output with the overal (median or) mean NWDI image (water occurrence)
             # TODO: check the effect of this compared to the tidal stage intervals output.. (non-linear)
-            waterElev = gridCellWaterOccurrenceOutput.select("waterOccurrencePercentage")\
-                        .unitScale(0, 100)\
-                        .multiply(ee.Number(NDWICollectionGTSMMapped.get("min_water_level")).subtract(ee.Number(NDWICollectionGTSMMapped.get("max_water_level"))))\
-                        .add(ee.Number(NDWICollectionGTSMMapped.get("max_water_level")))\
-                        .rename("intertidal_elevation")\
-				        .toFloat()
-            gridCellWaterOccurrenceOutput = gridCellWaterOccurrenceOutput.addBands(waterElev) #add intertidal elevation as a band to the water occurrence image
-            waterElevWeight = gridCellWaterOccurrenceOutput.select("waterOccurrencePercentageWeighted")\
-                        .unitScale(0, 100)\
-                        .multiply(ee.Number(NDWICollectionGTSMMapped.get("min_water_level")).subtract(ee.Number(NDWICollectionGTSMMapped.get("max_water_level"))))\
-                        .add(ee.Number(NDWICollectionGTSMMapped.get("max_water_level")))\
-                        .rename("intertidal_elevationweighted")\
-				        .toFloat()
-            gridCellWaterOccurrenceOutput = gridCellWaterOccurrenceOutput.addBands(waterElevWeight) #add weighted intertidal elevation as a band to the water occurrence image
+            waterElev = (
+                gridCellWaterOccurrenceOutput.select("waterOccurrencePercentage")
+                .unitScale(0, 100)
+                .multiply(
+                    ee.Number(NDWICollectionGTSMMapped.get("min_water_level")).subtract(
+                        ee.Number(NDWICollectionGTSMMapped.get("max_water_level"))
+                    )
+                )
+                .add(ee.Number(NDWICollectionGTSMMapped.get("max_water_level")))
+                .rename("intertidal_elevation")
+                .toFloat()
+            )
+            gridCellWaterOccurrenceOutput = gridCellWaterOccurrenceOutput.addBands(
+                waterElev
+            )  # add intertidal elevation as a band to the water occurrence image
+            waterElevWeight = (
+                gridCellWaterOccurrenceOutput.select(
+                    "waterOccurrencePercentageWeighted"
+                )
+                .unitScale(0, 100)
+                .multiply(
+                    ee.Number(NDWICollectionGTSMMapped.get("min_water_level")).subtract(
+                        ee.Number(NDWICollectionGTSMMapped.get("max_water_level"))
+                    )
+                )
+                .add(ee.Number(NDWICollectionGTSMMapped.get("max_water_level")))
+                .rename("intertidal_elevationweighted")
+                .toFloat()
+            )
+            gridCellWaterOccurrenceOutput = gridCellWaterOccurrenceOutput.addBands(
+                waterElevWeight
+            )  # add weighted intertidal elevation as a band to the water occurrence image
 
             # Add high tide offset, low tide offset and tide spread to image collection properties
-            out_img = gridCellWaterOccurrenceOutput.set({'gtsm_gebco_data_allempty': False,
-                                                        'gebco_hat': NDWICollectionGTSMMapped.get("gebco_hat"),
-                                                        'gebco_lat': NDWICollectionGTSMMapped.get("gebco_lat"),
-                                                        'gtsm_station': NDWICollectionGTSMMapped.get("gtsm_station"),
-                                                        'gtsm_station_lon': NDWICollectionGTSMMapped.get("gtsm_station_lon"),
-                                                        'gtsm_station_lat': NDWICollectionGTSMMapped.get("gtsm_station_lat"),
-                                                        'gtsm_station_spatial_offset': NDWICollectionGTSMMapped.get("gtsm_station_spatial_offset"),
-                                                        'gtsm_station_temporal_offsets': NDWICollectionGTSMMapped.get("gtsm_station_temporal_offsets"),
-                                                        'gtsm_water_levels': NDWICollectionGTSMMapped.get("gtsm_water_levels"),
-                                                        'gtsm_tidal_stage_percentages': NDWICollectionGTSMMapped.get("gtsm_tidal_stage_percentages"),
-                                                        'gtsm_times': NDWICollectionGTSMMapped.get("gtsm_times"),
-                                                        'system_time_starts': NDWICollectionGTSMMapped.get("system_time_starts"),
-                                                        'quality_scores': NDWICollectionGTSMMapped.get("quality_scores"),
-                                                        'high_tide_offset': HTO,
-                                                        'low_tide_offset': LTO,
-                                                        'max_water_level': MAWL,
-                                                        'min_water_level': MIWL,
-                                                        'tide_spread': SPR})
+            out_img = gridCellWaterOccurrenceOutput.set(
+                {
+                    "gtsm_gebco_data_allempty": False,
+                    "gebco_hat": NDWICollectionGTSMMapped.get("gebco_hat"),
+                    "gebco_lat": NDWICollectionGTSMMapped.get("gebco_lat"),
+                    "gtsm_station": NDWICollectionGTSMMapped.get("gtsm_station"),
+                    "gtsm_station_lon": NDWICollectionGTSMMapped.get(
+                        "gtsm_station_lon"
+                    ),
+                    "gtsm_station_lat": NDWICollectionGTSMMapped.get(
+                        "gtsm_station_lat"
+                    ),
+                    "gtsm_station_spatial_offset": NDWICollectionGTSMMapped.get(
+                        "gtsm_station_spatial_offset"
+                    ),
+                    "gtsm_station_temporal_offsets": NDWICollectionGTSMMapped.get(
+                        "gtsm_station_temporal_offsets"
+                    ),
+                    "gtsm_water_levels": NDWICollectionGTSMMapped.get(
+                        "gtsm_water_levels"
+                    ),
+                    "gtsm_tidal_stage_percentages": NDWICollectionGTSMMapped.get(
+                        "gtsm_tidal_stage_percentages"
+                    ),
+                    "gtsm_times": NDWICollectionGTSMMapped.get("gtsm_times"),
+                    "system_time_starts": NDWICollectionGTSMMapped.get(
+                        "system_time_starts"
+                    ),
+                    "quality_scores": NDWICollectionGTSMMapped.get("quality_scores"),
+                    "high_tide_offset": HTO,
+                    "low_tide_offset": LTO,
+                    "max_water_level": MAWL,
+                    "min_water_level": MIWL,
+                    "tide_spread": SPR,
+                }
+            )
 
             # select image to export, either water occurrence percentage (proxy, no calibrated) or depth (calibrated)
-            image_bathy = ee.Image(out_img.select(["intertidal_elevationweighted", "meanImagesAnalysedWeighted"]))
+            image_bathy = ee.Image(
+                out_img.select(
+                    ["intertidal_elevationweighted", "meanImagesAnalysedWeighted"]
+                )
+            )
 
             return image_bathy
 
         # calibrate the depth proxy
-        image_bathy = calibrated_bathy(gridCellWaterOccurrenceOutput, NDWICollectionGTSMMapped, HTO, LTO, MAWL, MIWL, SPR)
+        image_bathy = calibrated_bathy(
+            gridCellWaterOccurrenceOutput,
+            NDWICollectionGTSMMapped,
+            HTO,
+            LTO,
+            MAWL,
+            MIWL,
+            SPR,
+        )
 
         return image_bathy
 
@@ -799,11 +973,13 @@ class Bathymetry(object):
         # setter
         filteredNoGTSM = image_col
 
-        # get tide offsets and spread 
-        filteredNoGTSM = filteredNoGTSM.set({'gtsm_gebco_data_allempty': True})
+        # get tide offsets and spread
+        filteredNoGTSM = filteredNoGTSM.set({"gtsm_gebco_data_allempty": True})
 
         # get depth proxy
-        gridCellWaterOccurrenceOutput, NDWICollectionGTSMMapped = assets.depth_proxy(filteredNoGTSM)
+        gridCellWaterOccurrenceOutput, NDWICollectionGTSMMapped = assets.depth_proxy(
+            filteredNoGTSM
+        )
 
         # Calculate the uncalibrated bathymetry
         def uncalibrated_bathy(image_col, NDWI_col):
@@ -812,18 +988,34 @@ class Bathymetry(object):
             NDWICollectionGTSMMapped = NDWI_col
 
             # final output image, depends if GTSM data was found if this has depths or only proxies (the latter wont be exported later..)
-            out_img = ee.Image(gridCellWaterOccurrenceOutput.set({"gtsm_gebco_data_allempty": True,
-                                                                'system_time_starts': NDWICollectionGTSMMapped.get("system_time_starts"),
-                                                                'quality_scores': NDWICollectionGTSMMapped.get("quality_scores")}))
-            
+            out_img = ee.Image(
+                gridCellWaterOccurrenceOutput.set(
+                    {
+                        "gtsm_gebco_data_allempty": True,
+                        "system_time_starts": NDWICollectionGTSMMapped.get(
+                            "system_time_starts"
+                        ),
+                        "quality_scores": NDWICollectionGTSMMapped.get(
+                            "quality_scores"
+                        ),
+                    }
+                )
+            )
+
             # # select image to export, either water occurrence percentage (proxy, no calibrated) or depth (calibrated)
-            image_bathy = ee.Image(out_img.select(["waterOccurrencePercentageWeighted", "meanImagesAnalysedWeighted"]))
+            image_bathy = ee.Image(
+                out_img.select(
+                    ["waterOccurrencePercentageWeighted", "meanImagesAnalysedWeighted"]
+                )
+            )
 
             return image_bathy
 
         # uncalibrated bathy
-        image_bathy = uncalibrated_bathy(gridCellWaterOccurrenceOutput, NDWICollectionGTSMMapped)
-        
+        image_bathy = uncalibrated_bathy(
+            gridCellWaterOccurrenceOutput, NDWICollectionGTSMMapped
+        )
+
         return image_bathy
 
     @staticmethod
