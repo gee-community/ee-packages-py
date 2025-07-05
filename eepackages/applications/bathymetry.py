@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 import ee
+import warnings
 
 from eepackages import assets
 from eepackages import gl
@@ -10,7 +11,14 @@ from eepackages import utils
 # TODO: Jaap to clean up this script following the same style as original product
 
 # load GTSM & gebco data
-gtsm_col = ee.FeatureCollection("projects/bathymetry/assets/gtsm_waterlevels_2021_v2")
+#gtsm_col = ee.FeatureCollection("projects/bathymetry/assets/gtsm_waterlevels_2021_v2")
+gtsm_collections = {
+    2019: ee.FeatureCollection("projects/bathymetry/assets/gtsm_waterlevels_2019_v2"),
+    2020: ee.FeatureCollection("projects/bathymetry/assets/gtsm_waterlevels_2020_v2"),
+    2021: ee.FeatureCollection("projects/bathymetry/assets/gtsm_waterlevels_2021_v2"),
+    2022: ee.FeatureCollection("projects/bathymetry/assets/gtsm_waterlevels_2022_v2"),
+    2023: ee.FeatureCollection("projects/bathymetry/assets/gtsm_waterlevels_2023_v2")
+}
 gebco_image = ee.Image("projects/bathymetry/assets/gebco_2023_hat_lat")
 
 
@@ -465,6 +473,9 @@ class Bathymetry(object):
         if not tile:
             tile = ee.Feature(bounds)
 
+        # get the GTSM collection for the date range
+        gtsm_col = self.get_gtsm_collection(start, stop)
+
         # map GTSM & GEBCO on the image collection
         GTSMcol = images.select(["green", "nir", "weight"])
         GTSMcol = GTSMcol.map(
@@ -574,6 +585,47 @@ class Bathymetry(object):
             return image.clip(bounds)
         else:
             return image
+        
+    # Function to get a merged FeatureCollection for the date range
+    @staticmethod
+    def get_gtsm_collection(start, stop):
+        # Convert to Python datetime first (assume start/stop are ee.Date or strings)
+        if isinstance(start, ee.String):  # support both input types
+            start_str = start.getInfo() # TODO: get rid of getInfo
+            stop_str = stop.getInfo() # TODO: get rid of getInfo
+        else:
+            start_str = str(start)
+            stop_str = str(stop)
+
+        # Convert start and stop to datetime objects
+        start_dt = datetime.strptime(start_str, "%Y-%m-%d")
+        stop_dt = datetime.strptime(stop_str, "%Y-%m-%d")
+
+        # Create list of years that overlap with the date range
+        years = list(range(start_dt.year, stop_dt.year + 1))
+
+        # Load and merge collections for those years
+        col_list = []
+        for year in years:
+            asset_id = gtsm_collections.get(year) # get the correct collection
+            if asset_id:
+                col = ee.FeatureCollection(asset_id)
+                col_list.append(col)
+            else:
+                warnings.warn("Warning: No GTSM collection found for year {year}, skipping.")
+
+        if not col_list:
+            raise ValueError("No GTSM collections available for the selected date range.")
+
+        # Merge all collections
+        merged_col = col_list[0]
+        for col in col_list[1:]:
+            merged_col = merged_col.merge(col)
+
+        # Optionally filter by start/stop timestamp properties if present
+        merged_col = merged_col.filter(ee.Filter.date(start, stop))
+
+        return merged_col
 
     # Add gtsm and gebco data to images
     @staticmethod
